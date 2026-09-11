@@ -1,0 +1,1041 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1f2937">
+<title>Paris Walk — Guénégaud · Montmartre · Notre-Dame</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+  :root {
+    --bg: #f5f4f0;
+    --panel: #ffffff;
+    --ink: #1c1c1a;
+    --muted: #6b6b66;
+    --line: #e4e2dc;
+    --accent: #1d4ed8;
+    --accent-ink: #ffffff;
+    --route: #2563eb;
+    --route-done: #a3a3a3;
+    --warn: #b45309;
+    --ok: #15803d;
+    --radius: 14px;
+    --shadow: 0 1px 2px rgba(0,0,0,.06), 0 6px 20px rgba(0,0,0,.08);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--ink);
+    display: flex; flex-direction: column;
+    height: 100dvh; overflow: hidden;
+    -webkit-tap-highlight-color: transparent;
+  }
+  button { font: inherit; cursor: pointer; }
+
+  /* ---------- top bar ---------- */
+  header.bar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 12px; padding-top: max(8px, env(safe-area-inset-top));
+    background: #1f2937; color: #f9fafb;
+  }
+  header.bar h1 { font-size: 15px; font-weight: 600; margin: 0; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  header.bar .stat { font-size: 12px; color: #cbd5e1; white-space: nowrap; }
+  header.bar button {
+    background: rgba(255,255,255,.12); color: #fff; border: 0; border-radius: 999px;
+    padding: 6px 11px; font-size: 13px; font-weight: 500; display: inline-flex; align-items: center; gap: 6px;
+  }
+  header.bar button.on { background: #22c55e; color: #052e16; }
+  header.bar button.busy { opacity: .7; }
+  header.bar .menu { position: relative; }
+  header.bar .menu-list {
+    position: absolute; right: 0; top: 40px; background: var(--panel); color: var(--ink);
+    border-radius: 12px; box-shadow: var(--shadow); min-width: 240px; z-index: 1200; padding: 6px; display: none;
+  }
+  header.bar .menu-list.open { display: block; }
+  header.bar .menu-list button, header.bar .menu-list label {
+    display: block; width: 100%; text-align: left; background: none; color: var(--ink); border: 0;
+    padding: 10px 12px; border-radius: 8px; font-size: 14px; cursor: pointer;
+  }
+  header.bar .menu-list button:hover, header.bar .menu-list label:hover { background: var(--bg); }
+  header.bar .menu-list small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+  header.bar .menu-list hr { border: 0; border-top: 1px solid var(--line); margin: 6px 0; }
+
+  /* ---------- directions ---------- */
+  walk-directions { display: block; background: var(--panel); border-bottom: 1px solid var(--line); }
+  .dir-status {
+    display: flex; align-items: center; gap: 8px; padding: 6px 14px 0; font-size: 12px; color: var(--muted);
+  }
+  .dir-status .dot { width: 8px; height: 8px; border-radius: 50%; background: #9ca3af; }
+  .dir-status .dot.live { background: var(--ok); box-shadow: 0 0 0 3px rgba(21,128,61,.18); }
+  .dir-status .dot.off { background: var(--warn); }
+  .dir-status .spacer { flex: 1; }
+  .dir-list { list-style: none; margin: 0; padding: 4px 8px 8px; display: flex; flex-direction: column; gap: 4px; }
+  .dir-item { display: grid; grid-template-columns: 44px 1fr auto; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 10px; }
+  .dir-item.primary { background: #eff6ff; padding: 10px 8px; }
+  .dir-item .icon { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 10px; background: var(--accent); color: var(--accent-ink); }
+  .dir-item.primary .icon { width: 44px; height: 44px; }
+  .dir-item:not(.primary) .icon { width: 34px; height: 34px; background: #e5e7eb; color: #374151; margin-left: 5px; }
+  .dir-item .icon svg { width: 60%; height: 60%; }
+  .dir-item .text { min-width: 0; }
+  .dir-item .text .main { font-weight: 600; font-size: 16px; line-height: 1.25; }
+  .dir-item.primary .text .main { font-size: 18px; }
+  .dir-item:not(.primary) .text .main { font-weight: 500; font-size: 14px; color: #374151; }
+  .dir-item .main b.road { font-weight: 800; color: #111827; }
+  .dir-item:not(.primary) .main b.road { font-weight: 700; }
+  .dir-item .main .towards { color: var(--muted); font-weight: 500; }
+  .dir-item .text .sub { font-size: 12px; color: var(--muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dir-item .dist { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 18px; text-align: right; white-space: nowrap; }
+  .dir-item:not(.primary) .dist { font-size: 13px; font-weight: 600; color: var(--muted); }
+  .dir-empty { padding: 18px 14px; color: var(--muted); font-size: 14px; }
+  .dir-empty b { color: var(--ink); }
+
+  /* ---------- preview scrubber ---------- */
+  .scrub { display: flex; align-items: center; gap: 10px; padding: 4px 14px 10px; font-size: 12px; color: var(--muted); }
+  .scrub input[type=range] { flex: 1; accent-color: var(--accent); }
+  .scrub button { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 4px 8px; font-size: 12px; }
+  .scrub .lab { min-width: 64px; text-align: right; font-variant-numeric: tabular-nums; }
+
+  /* ---------- map ---------- */
+  walk-map { display: block; flex: 1; min-height: 160px; position: relative; }
+  walk-map .map { position: absolute; inset: 0; background: #e9e6df; }
+  .map-fabs { position: absolute; right: 10px; bottom: 12px; z-index: 900; display: flex; flex-direction: column; gap: 8px; }
+  .fab { width: 42px; height: 42px; border-radius: 50%; border: 0; background: var(--panel); color: var(--ink); box-shadow: var(--shadow); display: grid; place-items: center; }
+  .fab.on { background: var(--accent); color: #fff; }
+  .fab svg { width: 20px; height: 20px; }
+  .map-note { position: absolute; left: 10px; top: 10px; z-index: 900; background: rgba(255,255,255,.92); border-radius: 10px; padding: 6px 10px; font-size: 12px; color: var(--muted); box-shadow: var(--shadow); max-width: 70%; }
+  .leaflet-container { font: inherit; }
+  .you-marker { width: 18px; height: 18px; border-radius: 50%; background: #2563eb; border: 3px solid #fff; box-shadow: 0 0 0 2px rgba(37,99,235,.45), 0 2px 6px rgba(0,0,0,.35); }
+  .wp-marker { width: 22px; height: 22px; border-radius: 50%; background: #1f2937; color: #fff; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.4); font-size: 11px; font-weight: 700; display: grid; place-items: center; }
+  .wp-marker.done { background: #9ca3af; }
+  .poi-marker { width: 12px; height: 12px; border-radius: 50%; background: #d97706; border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,.4); }
+  .leaflet-popup-content { margin: 10px 12px; font-size: 13px; line-height: 1.35; }
+  .leaflet-popup-content b { font-size: 14px; }
+
+  /* ---------- nearby sheet ---------- */
+  walk-nearby { display: block; background: var(--panel); border-top: 1px solid var(--line); box-shadow: 0 -4px 16px rgba(0,0,0,.06); z-index: 950; transition: max-height .25s ease; max-height: 52px; overflow: hidden; }
+  walk-nearby.open { max-height: 46vh; }
+  .sheet-head { position: relative; display: flex; align-items: center; gap: 10px; height: 52px; padding: 0 14px; cursor: pointer; user-select: none; }
+  .sheet-head .grip { width: 36px; height: 4px; border-radius: 2px; background: #d4d4d4; position: absolute; left: 50%; transform: translateX(-50%); top: 6px; }
+  .sheet-head h2 { font-size: 15px; margin: 0; flex: 1; }
+  .sheet-head .count { font-size: 12px; color: var(--muted); }
+  .tabs { display: flex; gap: 4px; padding: 0 10px 8px; }
+  .tabs button { border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 5px 12px; font-size: 13px; color: var(--muted); }
+  .tabs button.on { background: #1f2937; color: #fff; border-color: #1f2937; }
+  .sheet-body { overflow-y: auto; max-height: calc(46vh - 92px); padding: 0 10px 12px; }
+  .poi { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin-bottom: 8px; background: var(--panel); }
+  .poi-head { display: flex; align-items: baseline; gap: 8px; cursor: pointer; }
+  .poi-head .name { font-weight: 600; font-size: 14px; flex: 1; }
+  .poi-head .kind { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .poi-head .dist { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .poi-body { display: none; margin-top: 8px; font-size: 13px; line-height: 1.45; color: #374151; }
+  .poi.open .poi-body { display: block; }
+  .poi-body .fact { margin: 0 0 6px; }
+  .poi-body img { float: right; width: 84px; height: 84px; object-fit: cover; border-radius: 8px; margin: 0 0 6px 10px; }
+  .poi-body .meta { font-size: 12px; color: var(--muted); margin-top: 6px; clear: both; }
+  .poi-body a { color: var(--accent); }
+  .poi-body .actions { margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap; }
+  .poi-body .actions button { border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 5px 10px; font-size: 12px; }
+  .poi.highlight { border-color: #fcd34d; background: #fffbeb; }
+  .sheet-empty { color: var(--muted); font-size: 13px; padding: 12px 6px; }
+
+  /* ---------- toast / overlay ---------- */
+  .toast { position: fixed; left: 50%; bottom: 70px; transform: translateX(-50%); background: #111827; color: #fff; padding: 10px 14px; border-radius: 10px; font-size: 13px; z-index: 2000; box-shadow: var(--shadow); max-width: 90vw; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  .toast.show { opacity: 1; }
+  .overlay { position: fixed; inset: 0; background: rgba(245,244,240,.9); z-index: 1500; display: grid; place-items: center; text-align: center; padding: 24px; font-size: 15px; color: var(--muted); }
+  .overlay .spinner { width: 28px; height: 28px; border: 3px solid #d1d5db; border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; margin: 0 auto 12px; }
+  .overlay b { color: var(--ink); }
+  .overlay button { margin-top: 12px; border: 0; background: var(--accent); color: #fff; border-radius: 8px; padding: 8px 14px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .hidden { display: none !important; }
+
+  @media (min-width: 900px) {
+    body { display: grid; grid-template-columns: 400px 1fr; grid-template-rows: auto 1fr; }
+    header.bar { grid-column: 1 / -1; }
+    walk-directions { grid-row: 2; grid-column: 1; overflow-y: auto; border-right: 1px solid var(--line); border-bottom: 0; }
+    walk-map { grid-row: 2; grid-column: 2; }
+    walk-nearby { position: absolute; right: 12px; top: 64px; width: 360px; border-radius: var(--radius); border: 1px solid var(--line); box-shadow: var(--shadow); max-height: 52px; }
+    walk-nearby.open { max-height: min(70vh, 720px); }
+    .sheet-body { max-height: calc(min(70vh, 720px) - 92px); }
+    .dir-list { gap: 8px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="bar">
+  <h1 id="title">Paris walk</h1>
+  <span class="stat" id="stat"></span>
+  <button id="gpsBtn" title="Follow my position">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="8"/></svg>
+    <span>GPS</span>
+  </button>
+  <div class="menu">
+    <button id="menuBtn" title="More">⋯</button>
+    <div class="menu-list" id="menuList">
+      <label>Import a GPX file<small>Route / track points are snapped to footpaths</small><input type="file" id="gpxFile" accept=".gpx,application/gpx+xml" hidden></label>
+      <button id="exportBtn">Export road-snapped GPX<small>Load it in any app that follows a track</small></button>
+      <hr>
+      <button id="rerouteBtn">Recalculate route<small>Clears the cached route and fetches again</small></button>
+      <button id="resetBtn">Reset to the built-in Paris loop</button>
+      <hr>
+      <button id="aboutBtn">About &amp; data sources</button>
+    </div>
+  </div>
+</header>
+
+<walk-directions id="directions"></walk-directions>
+<walk-map id="map"></walk-map>
+<walk-nearby id="nearby"></walk-nearby>
+
+<div class="toast" id="toast"></div>
+<div class="overlay" id="overlay"><div><div class="spinner"></div><div id="overlayText">Snapping the route to Paris streets…</div></div></div>
+
+<script id="default-gpx" type="application/gpx+xml">
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="ChatGPT" xmlns="http://www.topografix.com/GPX/1/1">
+  <metadata>
+    <name>Paris: Rue Guénégaud – Montmartre – Notre-Dame Loop</name>
+    <desc>Sightseeing walk starting and finishing at 19 Rue Guénégaud, Paris.</desc>
+  </metadata>
+  <wpt lat="48.8557053" lon="2.3388305"><name>19 Rue Guénégaud</name><desc>Start and finish</desc></wpt>
+  <wpt lat="48.8566500" lon="2.3411200"><name>Pont Neuf</name><desc>Cross toward the Right Bank</desc></wpt>
+  <wpt lat="48.8637600" lon="2.3367300"><name>Palais Royal</name><desc>Gardens and courtyard</desc></wpt>
+  <wpt lat="48.8652000" lon="2.3472000"><name>Rue Montorgueil</name><desc>Market and café street</desc></wpt>
+  <wpt lat="48.8712000" lon="2.3410200"><name>Passage des Panoramas</name><desc>Historic covered passage</desc></wpt>
+  <wpt lat="48.8844200" lon="2.3386400"><name>Place des Abbesses</name><desc>Gateway into Montmartre</desc></wpt>
+  <wpt lat="48.8871700" lon="2.3368700"><name>Moulin de la Galette</name><desc>Historic Montmartre landmark</desc></wpt>
+  <wpt lat="48.8887200" lon="2.3387400"><name>Rue de l'Abreuvoir</name><desc>Picturesque Montmartre street</desc></wpt>
+  <wpt lat="48.8886500" lon="2.3402200"><name>Clos Montmartre</name><desc>Montmartre vineyard</desc></wpt>
+  <wpt lat="48.8864700" lon="2.3408400"><name>Place du Tertre</name><desc>Artists' square</desc></wpt>
+  <wpt lat="48.8867000" lon="2.3431000"><name>Sacré-Cœur</name><desc>Main Montmartre stop</desc></wpt>
+  <wpt lat="48.8583400" lon="2.3374500"><name>Pont des Arts</name><desc>Return via the Seine</desc></wpt>
+  <wpt lat="48.8530000" lon="2.3499000"><name>Notre-Dame</name><desc>Afternoon cathedral stop</desc></wpt>
+  <rte>
+    <name>Rue Guénégaud – Montmartre – Notre-Dame Loop</name>
+    <rtept lat="48.8557053" lon="2.3388305"><name>19 Rue Guénégaud - start</name></rtept>
+    <rtept lat="48.8562000" lon="2.3395500"><name>Quai de Conti</name></rtept>
+    <rtept lat="48.8566500" lon="2.3411200"><name>Pont Neuf</name></rtept>
+    <rtept lat="48.8585500" lon="2.3405000"><name>Quai du Louvre</name></rtept>
+    <rtept lat="48.8606300" lon="2.3376200"><name>Cour Carrée du Louvre</name></rtept>
+    <rtept lat="48.8637600" lon="2.3367300"><name>Palais Royal</name></rtept>
+    <rtept lat="48.8629100" lon="2.3471300"><name>Rue Montorgueil south</name></rtept>
+    <rtept lat="48.8663500" lon="2.3472700"><name>Rue Montorgueil north</name></rtept>
+    <rtept lat="48.8712000" lon="2.3410200"><name>Passage des Panoramas</name></rtept>
+    <rtept lat="48.8760000" lon="2.3396000"><name>Notre-Dame-de-Lorette / Rue des Martyrs</name></rtept>
+    <rtept lat="48.8801000" lon="2.3391500"><name>Rue des Martyrs mid</name></rtept>
+    <rtept lat="48.8844200" lon="2.3386400"><name>Place des Abbesses</name></rtept>
+    <rtept lat="48.8861100" lon="2.3347500"><name>Rue Lepic</name></rtept>
+    <rtept lat="48.8871700" lon="2.3368700"><name>Moulin de la Galette</name></rtept>
+    <rtept lat="48.8887200" lon="2.3387400"><name>Rue de l'Abreuvoir</name></rtept>
+    <rtept lat="48.8886500" lon="2.3402200"><name>Clos Montmartre</name></rtept>
+    <rtept lat="48.8864700" lon="2.3408400"><name>Place du Tertre</name></rtept>
+    <rtept lat="48.8867000" lon="2.3431000"><name>Sacré-Cœur</name></rtept>
+    <rtept lat="48.8788500" lon="2.3394500"><name>Rue des Martyrs southbound</name></rtept>
+    <rtept lat="48.8716300" lon="2.3426500"><name>Grands Boulevards</name></rtept>
+    <rtept lat="48.8637600" lon="2.3367300"><name>Palais Royal return</name></rtept>
+    <rtept lat="48.8606100" lon="2.3376400"><name>Louvre courtyard</name></rtept>
+    <rtept lat="48.8583400" lon="2.3374500"><name>Pont des Arts</name></rtept>
+    <rtept lat="48.8566000" lon="2.3370000"><name>Quai de Conti return</name></rtept>
+    <rtept lat="48.8532000" lon="2.3438500"><name>Saint-Michel</name></rtept>
+    <rtept lat="48.8530000" lon="2.3499000"><name>Notre-Dame</name></rtept>
+    <rtept lat="48.8554500" lon="2.3443000"><name>Quai des Orfèvres</name></rtept>
+    <rtept lat="48.8566500" lon="2.3411200"><name>Pont Neuf return</name></rtept>
+    <rtept lat="48.8557053" lon="2.3388305"><name>19 Rue Guénégaud - finish</name></rtept>
+  </rte>
+</gpx>
+</script>
+
+<script>
+/* =====================================================================
+   Curated facts for the built-in loop (matched to GPX waypoint names)
+   ===================================================================== */
+const FACTS = {
+  "19 Rue Guénégaud": [
+    "Rue Guénégaud runs from the Seine up to Rue Mazarine in the 6th, right beside the Monnaie de Paris — the Paris Mint, which has struck coins here since 1775 and now houses a museum.",
+    "The street is named after Henri de Guénégaud, Louis XIV's Secretary of State, and today is better known for its small art galleries."
+  ],
+  "Pont Neuf": [
+    "Despite the name (\"New Bridge\"), Pont Neuf is the oldest surviving bridge across the Seine: begun under Henri III in 1578 and finished in 1607 under Henri IV, whose equestrian statue stands mid-bridge.",
+    "It was the first Paris bridge built without houses on it and the first with pavements, which made it an instant public promenade. The 381 carved stone mascarons (grotesque faces) line the cornices.",
+    "In 1985 Christo and Jeanne-Claude wrapped the whole bridge in 40,000 m² of golden fabric for two weeks."
+  ],
+  "Palais Royal": [
+    "Built in 1639 as Cardinal Richelieu's palace, it passed to the crown and later to the Orléans branch, who turned the galleries into shops and cafés in the 1780s — Paris's first shopping arcade, and a hotbed of the 1789 Revolution.",
+    "Daniel Buren's striped black-and-white columns (Les Deux Plateaux, 1986) fill the main courtyard; the quiet garden behind is ringed by boutiques and the Comédie-Française sits at the south corner."
+  ],
+  "Rue Montorgueil": [
+    "A pedestrianised market street lined with fishmongers, cheese shops and cafés — Monet painted it draped in flags for the 1878 national fête.",
+    "Stohrer at no. 51, founded in 1730 by Louis XV's pastry chef, is the oldest pâtisserie in Paris and claims the invention of the baba au rhum."
+  ],
+  "Passage des Panoramas": [
+    "Opened in 1799, this is one of the oldest covered passages in Paris, named after two painted panorama rotundas that once stood at its entrance.",
+    "In 1817 it became the first place in Paris lit by gas. Today it is known for stamp and postcard dealers, old engravers' shops and the 1860s Théâtre des Variétés backstage door."
+  ],
+  "Place des Abbesses": [
+    "Home to one of only two surviving glass-canopied Art Nouveau métro entrances by Hector Guimard (moved here from Hôtel de Ville in 1974); the Abbesses platforms are the deepest in Paris at 36 m.",
+    "In the small square Jehan-Rictus stands the Wall of Love (Le Mur des je t'aime, 2000): \"I love you\" written 311 times in 250 languages on 612 enamelled tiles."
+  ],
+  "Moulin de la Galette": [
+    "One of the last two windmills left on the Montmartre hill (there were once around fourteen). The Blute-Fin mill dates from 1622 and later became a famous open-air dance hall.",
+    "Renoir's Bal du moulin de la Galette (1876), Van Gogh and Toulouse-Lautrec all painted it. The name comes from the galette — a rustic bread — that the millers' family sold with a glass of milk."
+  ],
+  "Rue de l'Abreuvoir": [
+    "One of Montmartre's most photographed streets, named after the drinking trough where the village's animals were watered.",
+    "La Maison Rose on the corner was painted pink in 1908 and immortalised by Maurice Utrillo; the writer Dan Franck and Camille Pissarro both lived on this street."
+  ],
+  "Clos Montmartre": [
+    "A working vineyard planted in 1933 to stop developers building on the slope; about 1,900 vines yield roughly 1,000–1,500 bottles a year, auctioned for charity.",
+    "The Fête des Vendanges each October is Montmartre's biggest street party. Across the road is Au Lapin Agile, the cabaret where Picasso paid a bar tab with a painting now in the Met."
+  ],
+  "Place du Tertre": [
+    "The old village square of Montmartre, 130 m above the Seine, where licensed street artists have sold portraits and views since the 1920s.",
+    "Picasso, Utrillo and Modigliani drank here; the restaurant La Mère Catherine (1793) is where Russian soldiers in 1814 supposedly shouted \"bystro!\" — one origin story for the word bistro."
+  ],
+  "Sacré-Cœur": [
+    "Built between 1875 and 1914 as a vow after the Franco-Prussian War, and consecrated in 1919. The Château-Landon travertine stone secretes calcite when it rains, which keeps the basilica chalk-white.",
+    "The Savoyarde, cast in 1895, is one of the heaviest bells in the world at about 19 tonnes. The steps below give the best free panorama of Paris; the dome adds 300 steps and a 360° view.",
+    "The mosaic of Christ in the apse (1923) covers 475 m², one of the largest in the world."
+  ],
+  "Pont des Arts": [
+    "The first metal bridge in Paris (1804, under Napoleon), designed to look like a hanging garden. It links the Louvre's Cour Carrée with the Institut de France dome.",
+    "From 2008 couples fastened \"love locks\" to the railings; by 2015 they weighed 45 tonnes and a section collapsed, so the city replaced the grilles with glass panels."
+  ],
+  "Notre-Dame": [
+    "Construction started in 1163 and took nearly two centuries. The April 2019 fire destroyed the spire and roof; a five-year rebuild reopened the cathedral in December 2024, using 2,000 oaks for the new medieval-style roof frame.",
+    "Point Zéro, the brass star set in the square outside, is the spot from which every road distance in France is measured.",
+    "Look for the chimeras on the towers (they are 19th-century additions by Viollet-le-Duc) and the 13th-century rose windows, all three of which survived the fire."
+  ]
+};
+
+/* Extra facts keyed to intermediate route points (shown in Highlights when passed) */
+const ROUTE_NOTES = {
+  "Cour Carrée du Louvre": "The Cour Carrée is the oldest part of the Louvre, on the site of Philippe Auguste's 1190 fortress; the west wing is Pierre Lescot's Renaissance façade of the 1540s.",
+  "Rue des Martyrs mid": "Rue des Martyrs is one of the great food streets of Paris — cheese, chocolate, bakeries — climbing from Notre-Dame-de-Lorette up to the foot of the Butte.",
+  "Rue Lepic": "Rue Lepic winds up the hill past the Café des Deux Moulins at no. 15, the café from the film Amélie; Van Gogh lived with his brother Theo at no. 54 in 1886–88.",
+  "Grands Boulevards": "The Grands Boulevards follow the line of Louis XIV's demolished city walls, replaced in the 1670s by tree-lined promenades — the origin of the word boulevard (from bulwark).",
+  "Saint-Michel": "The Fontaine Saint-Michel (1860) was Haussmann's showpiece for the new boulevard; it shows the archangel Michael crushing the devil and is a classic Left Bank meeting point.",
+  "Quai des Orfèvres": "No. 36 Quai des Orfèvres was the headquarters of the Paris criminal police for over a century — the setting for Simenon's Inspector Maigret novels.",
+  "Quai de Conti": "The Quai de Conti passes the Institut de France, whose dome shelters the Académie française — guardians of the French language since 1635."
+};
+
+/* =====================================================================
+   Small utilities
+   ===================================================================== */
+const $ = (sel, root = document) => root.querySelector(sel);
+const R = 6371000;
+function haversine(a, b) {
+  const toRad = d => d * Math.PI / 180;
+  const dLat = toRad(b[0] - a[0]), dLon = toRad(b[1] - a[1]);
+  const s = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(a[0])) * Math.cos(toRad(b[0])) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(s));
+}
+function bearing(a, b) {
+  const toRad = d => d * Math.PI / 180;
+  const y = Math.sin(toRad(b[1] - a[1])) * Math.cos(toRad(b[0]));
+  const x = Math.cos(toRad(a[0])) * Math.sin(toRad(b[0])) - Math.sin(toRad(a[0])) * Math.cos(toRad(b[0])) * Math.cos(toRad(b[1] - a[1]));
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+function cardinal(deg) { return ["north", "northeast", "east", "southeast", "south", "southwest", "west", "northwest"][Math.round(deg / 45) % 8]; }
+function fmtDist(m) { return m < 1000 ? `${Math.round(m / (m < 100 ? 5 : 10)) * (m < 100 ? 5 : 10)} m` : `${(m / 1000).toFixed(m < 10000 ? 1 : 0)} km`; }
+function fmtTime(s) { const m = Math.round(s / 60); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")}`; }
+function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+function hashStr(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36); }
+function toast(msg, ms = 2600) { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove("show"), ms); }
+const store = {
+  get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { } },
+  del(k) { try { localStorage.removeItem(k); } catch { } }
+};
+
+/* Polyline decoding (Valhalla uses 1e6 precision) */
+function decodePolyline(str, precision = 6) {
+  const factor = Math.pow(10, precision), out = []; let index = 0, lat = 0, lng = 0;
+  while (index < str.length) {
+    let b, shift = 0, result = 0;
+    do { b = str.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+    lat += (result & 1) ? ~(result >> 1) : (result >> 1);
+    shift = 0; result = 0;
+    do { b = str.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+    lng += (result & 1) ? ~(result >> 1) : (result >> 1);
+    out.push([lat / factor, lng / factor]);
+  }
+  return out;
+}
+
+/* Douglas–Peucker simplification on lat/lon (approx metres) */
+function simplify(pts, tolM) {
+  if (pts.length < 3) return pts.slice();
+  const cosLat = Math.cos(pts[0][0] * Math.PI / 180);
+  const xy = pts.map(p => [p[1] * cosLat * 111320, p[0] * 110540]);
+  const keep = new Uint8Array(pts.length); keep[0] = keep[pts.length - 1] = 1;
+  const stack = [[0, pts.length - 1]];
+  while (stack.length) {
+    const [a, b] = stack.pop(); let maxD = 0, idx = -1;
+    const [ax, ay] = xy[a], [bx, by] = xy[b]; const dx = bx - ax, dy = by - ay, len2 = dx * dx + dy * dy || 1e-9;
+    for (let i = a + 1; i < b; i++) {
+      const t = Math.max(0, Math.min(1, ((xy[i][0] - ax) * dx + (xy[i][1] - ay) * dy) / len2));
+      const d = Math.hypot(xy[i][0] - (ax + t * dx), xy[i][1] - (ay + t * dy));
+      if (d > maxD) { maxD = d; idx = i; }
+    }
+    if (maxD > tolM) { keep[idx] = 1; stack.push([a, idx], [idx, b]); }
+  }
+  return pts.filter((_, i) => keep[i]);
+}
+
+/* =====================================================================
+   GPX parsing / export
+   ===================================================================== */
+function parseGPX(text) {
+  const doc = new DOMParser().parseFromString(text.trim(), "application/xml");
+  if (doc.querySelector("parsererror")) throw new Error("Not a valid GPX file");
+  const pts = sel => [...doc.querySelectorAll(sel)].map(el => ({
+    lat: +el.getAttribute("lat"), lon: +el.getAttribute("lon"),
+    name: el.querySelector("name")?.textContent?.trim() || "", desc: el.querySelector("desc")?.textContent?.trim() || ""
+  }));
+  let route = pts("rte rtept");
+  if (route.length < 2) route = pts("trk trkpt");
+  if (route.length < 2) throw new Error("GPX has no route or track with at least two points");
+  if (route.length > 150) route = simplify(route.map(p => [p.lat, p.lon]), 15).map(([lat, lon]) => ({ lat, lon, name: "", desc: "" }));
+  const highlights = pts("gpx > wpt");
+  const name = doc.querySelector("metadata > name, rte > name, trk > name")?.textContent?.trim() || "Walk";
+  return { name, route, highlights };
+}
+function toGPX(name, shape, highlights) {
+  const w = highlights.map(h => `  <wpt lat="${h.lat}" lon="${h.lon}"><name>${esc(h.name)}</name>${h.desc ? `<desc>${esc(h.desc)}</desc>` : ""}</wpt>`).join("\n");
+  const t = shape.map(p => `      <trkpt lat="${p[0].toFixed(6)}" lon="${p[1].toFixed(6)}"></trkpt>`).join("\n");
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="Paris Walk SPA" xmlns="http://www.topografix.com/GPX/1/1">\n  <metadata><name>${esc(name)} (road-snapped)</name></metadata>\n${w}\n  <trk><name>${esc(name)}</name><trkseg>\n${t}\n    </trkseg></trk>\n</gpx>\n`;
+}
+
+/* =====================================================================
+   Routing: Valhalla (pedestrian) with OSRM foot fallback
+   Result: { shape:[[lat,lon]...], maneuvers:[{i0,i1,text,street,kind,len}], length, time, provider }
+   ===================================================================== */
+const VALHALLA = "https://valhalla1.openstreetmap.de/route";
+const OSRM_FOOT = "https://routing.openstreetmap.de/routed-foot/route/v1/driving/";
+const CHUNK = 18; // keep well under public-server location limits
+
+function chunkPoints(points) {
+  const chunks = [];
+  for (let i = 0; i < points.length - 1; i += CHUNK - 1) chunks.push(points.slice(i, Math.min(points.length, i + CHUNK)));
+  return chunks;
+}
+function valhallaKind(type) {
+  const map = { 1: "depart", 2: "depart", 3: "depart", 4: "arrive", 5: "arrive", 6: "arrive", 7: "straight", 8: "straight", 9: "slight-right", 10: "right", 11: "sharp-right", 12: "uturn", 13: "uturn", 14: "sharp-left", 15: "left", 16: "slight-left", 17: "straight", 18: "right", 19: "left", 20: "straight", 21: "right", 22: "left", 23: "straight", 24: "right", 25: "left", 26: "roundabout", 27: "roundabout", 28: "ferry", 29: "ferry", 30: "straight", 31: "straight", 32: "straight", 33: "straight", 34: "straight", 35: "straight", 36: "straight", 37: "straight", 38: "arrive", 39: "elevator", 40: "stairs", 41: "escalator", 42: "building", 43: "building" };
+  return map[type] || "straight";
+}
+async function routeValhalla(points) {
+  const chunks = chunkPoints(points);
+  let shape = [], maneuvers = [], time = 0;
+  for (let c = 0; c < chunks.length; c++) {
+    const locs = chunks[c].map((p, i, arr) => ({ lat: p.lat, lon: p.lon, type: (i === 0 || i === arr.length - 1) ? "break" : "via" }));
+    const body = { locations: locs, costing: "pedestrian", costing_options: { pedestrian: { walking_speed: 4.8 } }, directions_options: { units: "kilometers", language: "en-US" } };
+    const res = await fetch(VALHALLA + "?json=" + encodeURIComponent(JSON.stringify(body)));
+    if (!res.ok) throw new Error(`Valhalla ${res.status}`);
+    const data = await res.json();
+    if (!data.trip?.legs?.length) throw new Error("Valhalla: empty trip");
+    for (const leg of data.trip.legs) {
+      const pts = decodePolyline(leg.shape, 6);
+      const offset = shape.length ? shape.length - 1 : 0;
+      if (shape.length) pts.shift(); // shared boundary point
+      shape = shape.concat(pts);
+      time += leg.summary?.time || 0;
+      leg.maneuvers.forEach((m, mi) => {
+        let kind = valhallaKind(m.type), text = m.instruction || "";
+        const street = (m.street_names || []).join(" / ");
+        const isFirst = c === 0 && mi === 0, isLast = c === chunks.length - 1 && mi === leg.maneuvers.length - 1;
+        if (kind === "arrive" && !isLast) return; // intermediate arrival at a chunk boundary
+        if (kind === "depart" && !isFirst) { kind = "straight"; text = street ? `Continue on ${street}` : "Continue"; }
+        maneuvers.push({ i0: m.begin_shape_index + offset, i1: m.end_shape_index + offset, text: text.replace(/\.$/, ""), street, kind, len: (m.length || 0) * 1000 });
+      });
+    }
+  }
+  return finishRoute(shape, maneuvers, time, "Valhalla (OpenStreetMap)");
+}
+async function routeOSRM(points) {
+  const chunks = chunkPoints(points);
+  let shape = [], maneuvers = [], time = 0;
+  for (let c = 0; c < chunks.length; c++) {
+    const coords = chunks[c].map(p => `${p.lon},${p.lat}`).join(";");
+    const res = await fetch(`${OSRM_FOOT}${coords}?overview=full&geometries=geojson&steps=true&continue_straight=false`);
+    if (!res.ok) throw new Error(`OSRM ${res.status}`);
+    const data = await res.json();
+    if (data.code !== "Ok" || !data.routes?.length) throw new Error("OSRM: " + (data.message || data.code));
+    const route = data.routes[0];
+    const pts = route.geometry.coordinates.map(([lon, lat]) => [lat, lon]);
+    const offset = shape.length ? shape.length - 1 : 0;
+    if (shape.length) pts.shift();
+    shape = shape.concat(pts);
+    time += route.duration || 0;
+    let cursor = offset;
+    const legs = route.legs;
+    legs.forEach((leg, li) => leg.steps.forEach((s, si) => {
+      const m = s.maneuver, loc = [m.location[1], m.location[0]];
+      // find shape index of this maneuver, scanning forward from the last one
+      let best = cursor, bestD = Infinity;
+      for (let i = cursor; i < shape.length && i < cursor + 400; i++) { const d = haversine(shape[i], loc); if (d < bestD) { bestD = d; best = i; } if (d < 1) break; }
+      cursor = best;
+      const name = s.name || "";
+      const isFirst = c === 0 && li === 0 && si === 0, isLast = c === chunks.length - 1 && li === legs.length - 1 && si === leg.steps.length - 1;
+      let kind = "straight", text;
+      const mod = (m.modifier || "").replace("uturn", "uturn");
+      const dirKind = { "left": "left", "right": "right", "slight left": "slight-left", "slight right": "slight-right", "sharp left": "sharp-left", "sharp right": "sharp-right", "straight": "straight", "uturn": "uturn" }[mod] || "straight";
+      switch (m.type) {
+        case "depart":
+          if (!isFirst) { kind = "straight"; text = name ? `Continue on ${name}` : "Continue"; }
+          else { kind = "depart"; text = `Head ${cardinal(m.bearing_after || 0)}${name ? " on " + name : ""}`; }
+          break;
+        case "arrive": if (!isLast) return; kind = "arrive"; text = "Arrive at the finish"; break;
+        case "roundabout": case "rotary": kind = "roundabout"; text = `Enter the roundabout and take exit ${m.exit || ""}${name ? " onto " + name : ""}`.trim(); break;
+        case "new name": case "continue": kind = dirKind === "straight" ? "straight" : dirKind; text = dirKind === "straight" ? `Continue${name ? " onto " + name : ""}` : `Keep ${mod}${name ? " onto " + name : ""}`; break;
+        case "fork": case "merge": case "on ramp": case "off ramp": case "end of road": case "turn": default:
+          kind = dirKind;
+          if (dirKind === "uturn") text = `Make a U-turn${name ? " onto " + name : ""}`;
+          else if (dirKind.startsWith("slight")) text = `Bear ${mod.split(" ")[1]}${name ? " onto " + name : ""}`;
+          else if (dirKind === "straight") text = `Continue straight${name ? " on " + name : ""}`;
+          else text = `Turn ${mod}${name ? " onto " + name : ""}`;
+      }
+      maneuvers.push({ i0: best, i1: best, text, street: name, kind, len: s.distance || 0 });
+    }));
+  }
+  // fold very short unnamed steps (kerb crossings, path stubs) into the previous instruction
+  maneuvers = maneuvers.filter((m, i) => i === 0 || i === maneuvers.length - 1 || m.street || m.len >= 25);
+  // fill in end indices from the next maneuver's start
+  maneuvers.forEach((m, i) => { m.i1 = i + 1 < maneuvers.length ? maneuvers[i + 1].i0 : shape.length - 1; });
+  return finishRoute(shape, maneuvers, time, "OSRM foot (OpenStreetMap)");
+}
+function finishRoute(shape, maneuvers, time, provider) {
+  const cum = [0];
+  for (let i = 1; i < shape.length; i++) cum[i] = cum[i - 1] + haversine(shape[i - 1], shape[i]);
+  const length = cum[cum.length - 1];
+  // drop zero-length "continue" noise and merge, keep depart/arrive
+  maneuvers = maneuvers.filter((m, i) => i === 0 || i === maneuvers.length - 1 || m.i1 > m.i0 || m.kind !== "straight");
+  maneuvers.forEach(m => { m.d0 = cum[Math.min(m.i0, cum.length - 1)]; m.d1 = cum[Math.min(m.i1, cum.length - 1)]; });
+  maneuvers.forEach((m, i) => {
+    if (m.street || m.kind === "arrive") return;
+    for (let j = i + 1; j < Math.min(maneuvers.length, i + 3); j++) if (maneuvers[j].street) { m.towards = maneuvers[j].street; m.towardsIn = maneuvers[j].d0 - m.d0; break; }
+  });
+  return { shape, cum, maneuvers, length, time: time || length / 1.3, provider };
+}
+async function computeRoute(points, onStatus) {
+  try { onStatus("Snapping the route to footpaths (OSRM)…"); return await routeOSRM(points); }
+  catch (e) { console.warn("OSRM failed, trying Valhalla", e); onStatus("OSRM unavailable — trying Valhalla…"); return await routeValhalla(points); }
+}
+
+/* =====================================================================
+   Street names: pedestrian routers walk on pavements mapped as unnamed
+   footways, so we look up the nearest named street for each instruction.
+   ===================================================================== */
+const OVERPASS = "https://overpass-api.de/api/interpreter";
+async function fetchNamedStreets(shape) {
+  const line = simplify(shape, 20).map(p => `${p[0].toFixed(5)},${p[1].toFixed(5)}`).join(",");
+  const q = `[out:json][timeout:60];way["highway"]["name"]["highway"!~"^(motorway|trunk|motorway_link|trunk_link)$"](around:35,${line});out geom;`;
+  const res = await fetch(OVERPASS, { method: "POST", body: "data=" + encodeURIComponent(q), headers: { "Content-Type": "application/x-www-form-urlencoded" } });
+  if (!res.ok) throw new Error(`Overpass ${res.status}`);
+  const data = await res.json();
+  return (data.elements || []).filter(w => w.geometry?.length > 1).map(w => ({
+    name: w.tags["name:en"] && /^(footway|steps|pedestrian)$/.test(w.tags.highway) ? w.tags.name : w.tags.name,
+    minor: /^(footway|steps|path|cycleway|service|crossing)$/.test(w.tags.highway) || w.tags.footway === "sidewalk",
+    pts: w.geometry.map(g => [g.lat, g.lon])
+  }));
+}
+function distToWay(p, pts) {
+  const cosLat = Math.cos(p[0] * Math.PI / 180); let best = Infinity;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i], b = pts[i + 1];
+    const bx = (b[1] - a[1]) * cosLat * 111320, by = (b[0] - a[0]) * 110540, px = (p[1] - a[1]) * cosLat * 111320, py = (p[0] - a[0]) * 110540;
+    const len2 = bx * bx + by * by || 1e-9, t = Math.max(0, Math.min(1, (px * bx + py * by) / len2));
+    best = Math.min(best, Math.hypot(px - t * bx, py - t * by));
+  }
+  return best;
+}
+function nearestStreet(ways, p, maxD = 30) {
+  let best = null, bestD = maxD;
+  for (const w of ways) { const d = distToWay(p, w.pts) + (w.minor ? 6 : 0); if (d < bestD) { bestD = d; best = w.name; } }
+  return best;
+}
+/* Fill in missing street names, then merge pavement hops that stay on the same street. */
+function enrichRoute(route, ways) {
+  const ms = route.maneuvers.map(m => ({ ...m }));
+  for (const m of ms) {
+    if (m.street || m.kind === "arrive") continue;
+    const probe = [Math.min(m.d0 + 12, m.d1), (m.d0 + m.d1) / 2, Math.min(m.d0 + 40, m.d1)].map(d => positionAt(route, d).pos);
+    const votes = {};
+    for (const p of probe) { const n = nearestStreet(ways, p); if (n) votes[n] = (votes[n] || 0) + 1; }
+    const name = Object.entries(votes).sort((a, b) => b[1] - a[1])[0]?.[0];
+    if (!name) continue;
+    m.street = name; m.named = "lookup";
+    if (m.kind === "depart") m.text = `Head ${cardinal(bearing(route.shape[m.i0], route.shape[Math.min(m.i0 + 3, route.shape.length - 1)]))} on ${name}`;
+    else if (/^(Continue|Keep|Bear|Head|Walk)/.test(m.text) || m.kind === "straight") m.text = `${m.text.replace(/ (on|onto|along) .*$/, "")} on ${name}`;
+    else m.text = `${m.text.replace(/\.$/, "")} onto ${name}`;
+  }
+  // merge: same street as the previous instruction and only a gentle change of direction
+  const out = [];
+  for (const m of ms) {
+    const prev = out[out.length - 1];
+    if (prev && m.kind !== "arrive" && m.street && m.street === prev.street && /^(straight|slight-left|slight-right)$/.test(m.kind)) { prev.i1 = m.i1; prev.len += m.len; continue; }
+    out.push(m);
+  }
+  return finishRoute(route.shape, out.map(({ i0, i1, text, street, kind, len }) => ({ i0, i1, text, street, kind, len })), route.time, route.provider);
+}
+
+/* =====================================================================
+   Nearby POIs: Overpass along the route, Wikipedia summaries on demand
+   ===================================================================== */
+async function fetchPOIs(shape) {
+  const simp = simplify(shape, 40);
+  const line = simp.map(p => `${p[0].toFixed(5)},${p[1].toFixed(5)}`).join(",");
+  const around = `(around:140,${line})`;
+  const q = `[out:json][timeout:40];(
+    nwr["tourism"~"^(attraction|museum|artwork|viewpoint|gallery|theme_park)$"]["name"]${around};
+    nwr["historic"~"^(monument|memorial|building|castle|church|city_gate|fort|manor|palace|ruins|tower|wayside_cross|fountain|archaeological_site)$"]["name"]${around};
+    nwr["amenity"~"^(place_of_worship|fountain|theatre|arts_centre|marketplace)$"]["name"]${around};
+    nwr["building"~"^(cathedral|church|chapel|basilica|synagogue|palace|castle)$"]["name"]${around};
+    nwr["leisure"~"^(garden|park)$"]["name"]${around};
+    nwr["shop"~"^(pastry|bakery|chocolate|cheese|books)$"]["name"]["wikipedia"]${around};
+    nwr["amenity"~"^(cafe|restaurant|bar)$"]["name"]["wikipedia"]${around};
+  );out center tags 600;`;
+  const res = await fetch(OVERPASS, { method: "POST", body: "data=" + encodeURIComponent(q), headers: { "Content-Type": "application/x-www-form-urlencoded" } });
+  if (!res.ok) throw new Error(`Overpass ${res.status}`);
+  const data = await res.json();
+  const seen = new Set(), out = [];
+  for (const el of data.elements || []) {
+    const lat = el.lat ?? el.center?.lat, lon = el.lon ?? el.center?.lon, t = el.tags || {};
+    if (lat == null || !t.name) continue;
+    const key = t.name.toLowerCase() + "|" + (t.wikidata || "");
+    if (seen.has(key)) continue; seen.add(key);
+    out.push({ id: `${el.type}/${el.id}`, name: t["name:en"] || t.name, lat, lon, kind: poiKind(t), tags: t });
+  }
+  return out;
+}
+function poiKind(t) {
+  if (t.tourism === "museum") return "museum";
+  if (t.tourism === "artwork") return "artwork";
+  if (t.tourism === "viewpoint") return "viewpoint";
+  if (t.tourism === "gallery") return "gallery";
+  if (t.amenity === "place_of_worship" || /church|chapel|cathedral|basilica|synagogue/.test(t.building || "")) return "church";
+  if (t.historic) return t.historic.replace("_", " ");
+  if (t.amenity === "fountain") return "fountain";
+  if (t.amenity === "theatre") return "theatre";
+  if (t.amenity === "marketplace") return "market";
+  if (t.leisure) return t.leisure;
+  if (t.shop) return t.shop;
+  if (t.amenity) return t.amenity;
+  return t.tourism || "sight";
+}
+async function wikiSummary(tags) {
+  let lang = "en", title = null;
+  if (tags["wikipedia:en"]) { title = tags["wikipedia:en"]; }
+  else if (tags.wikipedia) { const m = tags.wikipedia.match(/^(\w+):(.+)$/); if (m) { lang = m[1]; title = m[2]; } else title = tags.wikipedia; }
+  if (!title && tags.wikidata) {
+    // resolve via Wikidata sitelinks: prefer en, then fr
+    const r = await fetch(`https://www.wikidata.org/w/api.php?action=wbgetentities&ids=${encodeURIComponent(tags.wikidata)}&props=sitelinks&format=json&origin=*`);
+    if (!r.ok) return null;
+    const ent = Object.values((await r.json()).entities || {})[0];
+    const sl = ent?.sitelinks || {};
+    if (sl.enwiki) { lang = "en"; title = sl.enwiki.title; } else if (sl.frwiki) { lang = "fr"; title = sl.frwiki.title; } else return null;
+  }
+  if (!title) return null;
+  const r = await fetch(`https://${lang}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title.replace(/ /g, "_"))}`);
+  if (!r.ok) return null;
+  const j = await r.json();
+  return { extract: j.extract, thumb: j.thumbnail?.source, url: j.content_urls?.desktop?.page || j.content_urls?.mobile?.page, lang };
+}
+
+/* =====================================================================
+   App state (tiny observable store)
+   ===================================================================== */
+const state = {
+  data: {
+    name: "", points: [], highlights: [], route: null, pois: [], poisStatus: "idle",
+    pos: null, accuracy: null, gps: false, progress: 0, offRoute: false, snapIdx: 0, mode: "preview" // preview | gps
+  },
+  subs: new Set(),
+  set(patch) { Object.assign(this.data, patch); this.subs.forEach(fn => fn(this.data, patch)); },
+  on(fn) { this.subs.add(fn); return () => this.subs.delete(fn); }
+};
+
+/* Project a position onto the route, preferring positions near the last progress (loops revisit streets). */
+function snapToRoute(route, pos, lastProgress, fresh = false) {
+  const { shape, cum } = route;
+  let best = null;
+  for (let i = 0; i < shape.length - 1; i++) {
+    const a = shape[i], b = shape[i + 1];
+    // planar projection in a small area
+    const cosLat = Math.cos(a[0] * Math.PI / 180);
+    const ax = 0, ay = 0, bx = (b[1] - a[1]) * cosLat * 111320, by = (b[0] - a[0]) * 110540;
+    const px = (pos[1] - a[1]) * cosLat * 111320, py = (pos[0] - a[0]) * 110540;
+    const len2 = bx * bx + by * by || 1e-9;
+    const t = Math.max(0, Math.min(1, (px * bx + py * by) / len2));
+    const d = Math.hypot(px - t * bx, py - t * by);
+    const prog = cum[i] + t * Math.sqrt(len2);
+    // penalise going backwards, and jumping far ahead (a loop's second pass) when a nearby candidate exists
+    const back = Math.max(0, lastProgress - prog), ahead = Math.max(0, prog - lastProgress - 400);
+    const score = fresh ? d + prog * 0.002 : d + back * 0.15 + ahead * 0.03; // fresh: nearest wins, earlier pass breaks ties
+    if (!best || score < best.score) best = { score, dist: d, prog, idx: i, t };
+  }
+  return best;
+}
+function positionAt(route, progress) {
+  const { shape, cum } = route;
+  let lo = 0, hi = cum.length - 1;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (cum[mid] < progress) lo = mid + 1; else hi = mid; }
+  const i = Math.max(1, lo), seg = cum[i] - cum[i - 1] || 1, t = Math.max(0, Math.min(1, (progress - cum[i - 1]) / seg));
+  return { pos: [shape[i - 1][0] + (shape[i][0] - shape[i - 1][0]) * t, shape[i - 1][1] + (shape[i][1] - shape[i - 1][1]) * t], idx: i - 1 };
+}
+function upcoming(route, progress, n = 3) {
+  const ms = route.maneuvers;
+  // the current maneuver is the last one whose start is behind us; upcoming = those after it
+  let cur = 0;
+  for (let i = 0; i < ms.length; i++) if (ms[i].d0 <= progress + 8) cur = i; else break;
+  const list = [];
+  const start = (cur === 0 && progress < 30) ? 0 : cur + 1; // show the "head north on…" step while still at the start
+  for (let i = start; i < ms.length && list.length < n; i++) list.push({ m: ms[i], in: Math.max(0, ms[i].d0 - progress) });
+  return { current: ms[cur], list };
+}
+
+/* =====================================================================
+   Icons
+   ===================================================================== */
+const ICON = {
+  depart: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20V6M6 12l6-6 6 6"/></svg>',
+  arrive: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V4h11l-2 4 2 4H5"/></svg>',
+  straight: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20V5M7 10l5-5 5 5"/></svg>',
+  left: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M17 20v-7a4 4 0 0 0-4-4H5M9 5L5 9l4 4"/></svg>',
+  right: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7 20v-7a4 4 0 0 1 4-4h8M15 5l4 4-4 4"/></svg>',
+  "slight-left": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M14 20v-6L8 8M8 14V8h6"/></svg>',
+  "slight-right": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20v-6l6-6M16 14V8h-6"/></svg>',
+  "sharp-left": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M16 20V9l-8 9M8 12v6h6"/></svg>',
+  "sharp-right": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 20V9l8 9M16 12v6h-6"/></svg>',
+  uturn: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 20v-9a4 4 0 0 1 8 0v5M12 12l4 4 4-4"/></svg>',
+  roundabout: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="4"/><path d="M12 9V3M9 6l3-3 3 3"/></svg>',
+  stairs: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4v-4h4v-4h4V8h4"/></svg>',
+  elevator: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 13l3 3 3-3M9 9l3-3 3 3"/></svg>',
+  ferry: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17c2 2 4 2 6 0s4-2 6 0 4 2 6 0M5 14l1-6h12l1 6M9 8V5h6v3"/></svg>',
+  building: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21V5l8-3 8 3v16M10 21v-5h4v5"/></svg>'
+};
+ICON.escalator = ICON.stairs;
+const iconFor = k => ICON[k] || ICON.straight;
+
+/* =====================================================================
+   <walk-directions>
+   ===================================================================== */
+class WalkDirections extends HTMLElement {
+  connectedCallback() {
+    this.innerHTML = `
+      <div class="dir-status"><span class="dot" id="dot"></span><span id="statusText">Preview mode</span><span class="spacer"></span><span id="remaining"></span></div>
+      <ol class="dir-list" id="list"></ol>
+      <div class="scrub" id="scrub">
+        <button id="back" title="Back 100 m">−100 m</button>
+        <input type="range" id="range" min="0" max="1000" value="0" step="1">
+        <button id="fwd" title="Forward 100 m">+100 m</button>
+        <span class="lab" id="lab">0 m</span>
+      </div>`;
+    const range = $("#range", this);
+    range.addEventListener("input", () => { const r = state.data.route; if (!r) return; setPreviewProgress(r.length * range.value / 1000); });
+    $("#back", this).onclick = () => setPreviewProgress(Math.max(0, state.data.progress - 100));
+    $("#fwd", this).onclick = () => setPreviewProgress(Math.min(state.data.route?.length || 0, state.data.progress + 100));
+    state.on(d => this.render(d));
+  }
+  render(d) {
+    const list = $("#list", this), dot = $("#dot", this), st = $("#statusText", this), rem = $("#remaining", this);
+    $("#scrub", this).classList.toggle("hidden", d.mode === "gps");
+    if (!d.route) { list.innerHTML = `<li class="dir-empty">No route yet.</li>`; return; }
+    const { current, list: up } = upcoming(d.route, d.progress, 3);
+    const left = Math.max(0, d.route.length - d.progress);
+    rem.textContent = `${fmtDist(left)} left · ~${fmtTime(left / 1.3)}`;
+    $("#range", this).value = Math.round(1000 * d.progress / d.route.length);
+    $("#lab", this).textContent = fmtDist(d.progress);
+    if (d.mode === "gps") {
+      dot.className = "dot " + (d.pos ? (d.offRoute ? "off" : "live") : "");
+      st.textContent = !d.pos ? "Waiting for GPS…" : d.offRoute ? `Off route — ${fmtDist(d.offDist)} from the path` : (current?.street ? `On ${current.street}` : current?.towards ? `Heading to ${current.towards}` : "On route");
+    } else {
+      dot.className = "dot";
+      st.textContent = current?.street ? `Preview · on ${current.street}` : current?.towards ? `Preview · heading to ${current.towards}` : "Preview — drag the slider or tap the map to move";
+    }
+    if (!up.length) {
+      list.innerHTML = `<li class="dir-item primary"><div class="icon">${ICON.arrive}</div><div class="text"><div class="main">${esc(current?.text || "You have arrived")}</div><div class="sub">End of the walk</div></div><div class="dist"></div></li>`;
+      return;
+    }
+    const mainHtml = m => {
+      if (m.street) { const t = esc(m.text), st = esc(m.street); return t.includes(st) ? t.replace(st, `<b class="road">${st}</b>`) : `${t} <b class="road">${st}</b>`; }
+      return esc(m.text) + (m.towards ? ` <span class="towards">→ <b class="road">${esc(m.towards)}</b></span>` : "");
+    };
+    const subHtml = (m, primary) => {
+      if (m.kind === "arrive") return "";
+      if (m.street && m.len > 0) return `then ${fmtDist(m.len)} along ${esc(m.street)}`;
+      if (m.towards) return `unnamed path — reach ${esc(m.towards)} in ${fmtDist(m.towardsIn)}`;
+      return m.len > 0 ? `then ${fmtDist(m.len)}` : "";
+    };
+    list.innerHTML = up.map((u, i) => `
+      <li class="dir-item ${i === 0 ? "primary" : ""}" data-d="${u.m.d0}">
+        <div class="icon">${iconFor(u.m.kind)}</div>
+        <div class="text"><div class="main">${mainHtml(u.m)}</div>${i === 0 && subHtml(u.m, true) ? `<div class="sub">${subHtml(u.m, true)}</div>` : ""}</div>
+        <div class="dist">${i === 0 ? (u.in < 15 ? "Now" : fmtDist(u.in)) : fmtDist(u.in)}</div>
+      </li>`).join("");
+    list.querySelectorAll(".dir-item").forEach(li => li.onclick = () => { const p = positionAt(d.route, +li.dataset.d); document.getElementById("map").flyTo(p.pos); });
+  }
+}
+customElements.define("walk-directions", WalkDirections);
+
+function setPreviewProgress(p) {
+  const r = state.data.route; if (!r) return;
+  const { pos } = positionAt(r, p);
+  state.set({ progress: p, pos, offRoute: false, offDist: 0 });
+}
+
+/* =====================================================================
+   <walk-map>
+   ===================================================================== */
+class WalkMap extends HTMLElement {
+  connectedCallback() {
+    this.innerHTML = `<div class="map" id="leaflet"></div>
+      <div class="map-note hidden" id="note"></div>
+      <div class="map-fabs">
+        <button class="fab on" id="follow" title="Keep the map centred on me"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M21 3L10 14M21 3l-7 18-4-7-7-4z"/></svg></button>
+        <button class="fab" id="fit" title="Show the whole route"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/></svg></button>
+      </div>`;
+    this.follow = true;
+    const map = this.map = L.map($("#leaflet", this), { zoomControl: false, attributionControl: true }).setView([48.868, 2.341], 13);
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors' }).addTo(map);
+    L.control.zoom({ position: "bottomleft" }).addTo(map);
+    this.routeDone = L.polyline([], { color: "#9ca3af", weight: 6, opacity: .85, lineCap: "round" }).addTo(map);
+    this.routeAhead = L.polyline([], { color: "#ffffff", weight: 10, opacity: .9, lineCap: "round" }).addTo(map);
+    this.routeAhead2 = L.polyline([], { color: "#2563eb", weight: 6, opacity: .95, lineCap: "round" }).addTo(map);
+    this.wpLayer = L.layerGroup().addTo(map);
+    this.poiLayer = L.layerGroup().addTo(map);
+    this.you = L.marker([0, 0], { icon: L.divIcon({ className: "", html: '<div class="you-marker"></div>', iconSize: [18, 18], iconAnchor: [9, 9] }), zIndexOffset: 1000 });
+    this.acc = L.circle([0, 0], { radius: 0, color: "#2563eb", weight: 1, fillOpacity: .08 });
+    map.on("dragstart", () => this.setFollow(false));
+    map.on("click", e => {
+      const d = state.data; if (!d.route) return;
+      const s = snapToRoute(d.route, [e.latlng.lat, e.latlng.lng], 0, true); if (!s || s.dist > 120) return;
+      if (d.mode === "preview") setPreviewProgress(s.prog);
+      else { state.set({ progress: s.prog }); toast("Progress set here — GPS will continue from this point."); }
+    });
+    $("#follow", this).onclick = () => { this.setFollow(true); this.center(true); };
+    $("#fit", this).onclick = () => { this.setFollow(false); this.fit(); };
+    this.lastRoute = null; this.lastPois = null; this.lastDoneIdx = -1;
+    state.on((d, patch) => this.render(d, patch));
+    new ResizeObserver(() => map.invalidateSize()).observe(this);
+  }
+  setFollow(v) { this.follow = v; $("#follow", this).classList.toggle("on", v); }
+  fit() { const r = state.data.route; if (r) this.map.fitBounds(L.latLngBounds(r.shape), { padding: [30, 30] }); }
+  flyTo(pos) { this.setFollow(false); this.map.flyTo(pos, Math.max(this.map.getZoom(), 17), { duration: .6 }); }
+  center(force) { const d = state.data; if (!d.pos) return; if (force || this.follow) this.map.setView(d.pos, Math.max(this.map.getZoom(), 17), { animate: true }); }
+  render(d, patch) {
+    if (d.route !== this.lastRoute) {
+      this.lastRoute = d.route; this.wpLayer.clearLayers();
+      if (d.route) {
+        this.routeAhead.setLatLngs(d.route.shape); this.routeAhead2.setLatLngs(d.route.shape); this.routeDone.setLatLngs([]);
+        d.highlights.forEach((h, i) => L.marker([h.lat, h.lon], { icon: L.divIcon({ className: "", html: `<div class="wp-marker">${i + 1}</div>`, iconSize: [22, 22], iconAnchor: [11, 11] }) })
+          .bindPopup(`<b>${esc(h.name)}</b><br>${esc(h.desc || "")}`).addTo(this.wpLayer));
+        this.fit();
+      }
+    }
+    if (d.pois !== this.lastPois) {
+      this.lastPois = d.pois; this.poiLayer.clearLayers();
+      d.pois.forEach(p => L.marker([p.lat, p.lon], { icon: L.divIcon({ className: "", html: '<div class="poi-marker"></div>', iconSize: [12, 12], iconAnchor: [6, 6] }) })
+        .bindPopup(`<b>${esc(p.name)}</b><br><span style="color:#6b6b66">${esc(p.kind)}</span>`).on("click", () => document.getElementById("nearby").open(p.id)).addTo(this.poiLayer));
+    }
+    if (d.route && d.pos) {
+      if (!this.map.hasLayer(this.you)) { this.you.addTo(this.map); this.acc.addTo(this.map); }
+      this.you.setLatLng(d.pos);
+      this.acc.setLatLng(d.pos).setRadius(d.mode === "gps" && d.accuracy ? d.accuracy : 0);
+      // split route into done / ahead at the current progress
+      const { idx, pos } = positionAt(d.route, d.progress);
+      if (idx !== this.lastDoneIdx || "progress" in patch) {
+        this.lastDoneIdx = idx;
+        const done = d.route.shape.slice(0, idx + 1).concat([pos]);
+        const ahead = [pos].concat(d.route.shape.slice(idx + 1));
+        this.routeDone.setLatLngs(done); this.routeAhead.setLatLngs(ahead); this.routeAhead2.setLatLngs(ahead);
+      }
+      if ("pos" in patch) this.center(false);
+    }
+    const note = $("#note", this);
+    if (d.mode === "preview" && d.route) { note.textContent = "Preview: tap the route to jump there. Turn on GPS when you set off."; note.classList.remove("hidden"); }
+    else note.classList.add("hidden");
+  }
+}
+customElements.define("walk-map", WalkMap);
+
+/* =====================================================================
+   <walk-nearby>
+   ===================================================================== */
+class WalkNearby extends HTMLElement {
+  connectedCallback() {
+    this.tab = "nearby"; this.openIds = new Set(); this.wiki = {};
+    this.innerHTML = `
+      <div class="sheet-head" id="head"><div class="grip"></div><h2 id="sheetTitle">Nearby</h2><span class="count" id="count"></span><span id="chev">▲</span></div>
+      <div class="tabs"><button data-tab="nearby" class="on">Nearby</button><button data-tab="highlights">Highlights</button><button data-tab="all">All sights</button></div>
+      <div class="sheet-body" id="body"></div>`;
+    $("#head", this).onclick = () => this.toggle();
+    this.querySelectorAll(".tabs button").forEach(b => b.onclick = () => { this.tab = b.dataset.tab; this.querySelectorAll(".tabs button").forEach(x => x.classList.toggle("on", x === b)); this.render(state.data); });
+    state.on((d, patch) => {
+      if ("pois" in patch || "route" in patch || "poisStatus" in patch) return this.render(d);
+      if (("progress" in patch || "pos" in patch) && this.classList.contains("open")) {
+        clearTimeout(this._t); this._t = setTimeout(() => this.render(state.data), 1500); // throttle while walking
+      }
+    });
+  }
+  toggle(force) { const open = force ?? !this.classList.contains("open"); this.classList.toggle("open", open); $("#chev", this).textContent = open ? "▼" : "▲"; }
+  open(id) { this.toggle(true); this.tab = "all"; this.querySelectorAll(".tabs button").forEach(x => x.classList.toggle("on", x.dataset.tab === "all")); this.openIds.add(id); this.render(state.data); const el = this.querySelector(`[data-id="${CSS.escape(id)}"]`); el?.scrollIntoView({ block: "nearest" }); this.loadWiki(id); }
+  items(d) {
+    const pos = d.pos, prog = d.progress;
+    const hi = d.highlights.map((h, i) => ({ id: "hl/" + i, name: h.name, lat: h.lat, lon: h.lon, kind: "highlight", desc: h.desc, facts: FACTS[h.name] || [], highlight: true, order: i }));
+    // route notes attached to named route points
+    const notes = d.points.filter(p => ROUTE_NOTES[p.name]).map((p, i) => ({ id: "note/" + i, name: p.name.replace(/ (mid|south|north|return|southbound)$/, ""), lat: p.lat, lon: p.lon, kind: "on the way", facts: [ROUTE_NOTES[p.name]], highlight: false }));
+    const all = hi.concat(notes, d.pois.map(p => ({ ...p, highlight: false })));
+    all.forEach(x => { x.dist = pos ? haversine(pos, [x.lat, x.lon]) : null; });
+    return all;
+  }
+  render(d) {
+    const body = $("#body", this), count = $("#count", this);
+    if (!d.route) { body.innerHTML = `<div class="sheet-empty">Route not loaded yet.</div>`; return; }
+    let list = this.items(d);
+    if (this.tab === "nearby") { list = list.filter(x => x.dist != null && x.dist <= 220).sort((a, b) => a.dist - b.dist).slice(0, 25); }
+    else if (this.tab === "highlights") { list = list.filter(x => x.highlight || x.kind === "on the way").sort((a, b) => (a.order ?? 99) - (b.order ?? 99)); }
+    else { list = list.sort((a, b) => (a.highlight ? -1 : 1) - (b.highlight ? -1 : 1) || a.name.localeCompare(b.name)); }
+    count.textContent = this.tab === "nearby" ? `${list.length} within 220 m` : `${list.length}`;
+    $("#sheetTitle", this).textContent = this.tab === "nearby" ? "Nearby" : this.tab === "highlights" ? "Highlights & facts" : "All sights on this walk";
+    if (!list.length) {
+      body.innerHTML = `<div class="sheet-empty">${d.poisStatus === "loading" ? "Looking up sights along the route…" : d.poisStatus === "error" ? "Couldn't load sights from OpenStreetMap (offline?). The curated highlights still work." : this.tab === "nearby" ? "Nothing within 220 m right now — keep walking, or check Highlights." : "Nothing found."}</div>`;
+      return;
+    }
+    body.innerHTML = list.map(x => {
+      const w = this.wiki[x.id];
+      const facts = (x.facts || []).map(f => `<p class="fact">${esc(f)}</p>`).join("");
+      const wikiHtml = w === undefined ? "" : w === null ? `<p class="meta">No Wikipedia article found.</p>` : w === "loading" ? `<p class="meta">Loading facts…</p>` :
+        `${w.thumb ? `<img src="${esc(w.thumb)}" alt="">` : ""}<p class="fact">${esc(w.extract)}</p><p class="meta"><a href="${esc(w.url)}" target="_blank" rel="noopener">Wikipedia (${w.lang})</a></p>`;
+      const t = x.tags || {};
+      const meta = [t.opening_hours ? `Hours: ${esc(t.opening_hours)}` : "", t.description ? esc(t.description) : "", t.inscription ? `“${esc(t.inscription)}”` : "", t.website ? `<a href="${esc(t.website)}" target="_blank" rel="noopener">Website</a>` : ""].filter(Boolean).join(" · ");
+      const hasWiki = t.wikipedia || t["wikipedia:en"] || t.wikidata;
+      return `<div class="poi ${x.highlight ? "highlight" : ""} ${this.openIds.has(x.id) ? "open" : ""}" data-id="${esc(x.id)}">
+        <div class="poi-head"><span class="name">${x.order != null ? x.order + 1 + ". " : ""}${esc(x.name)}</span><span class="kind">${esc(x.kind)}</span>${x.dist != null ? `<span class="dist">${fmtDist(x.dist)}</span>` : ""}</div>
+        <div class="poi-body">${x.desc ? `<p class="meta">${esc(x.desc)}</p>` : ""}${facts}${wikiHtml}${meta ? `<p class="meta">${meta}</p>` : ""}
+          <div class="actions"><button data-act="map">Show on map</button>${hasWiki && w === undefined ? `<button data-act="wiki">Read more (Wikipedia)</button>` : ""}</div>
+        </div></div>`;
+    }).join("");
+    body.querySelectorAll(".poi").forEach(el => {
+      const id = el.dataset.id;
+      $(".poi-head", el).onclick = () => { if (this.openIds.has(id)) this.openIds.delete(id); else { this.openIds.add(id); } el.classList.toggle("open"); };
+      $('[data-act="map"]', el).onclick = () => { const x = list.find(i => i.id === id); document.getElementById("map").flyTo([x.lat, x.lon]); };
+      const wb = $('[data-act="wiki"]', el); if (wb) wb.onclick = () => this.loadWiki(id);
+    });
+  }
+  async loadWiki(id) {
+    const x = this.items(state.data).find(i => i.id === id);
+    if (!x || !x.tags || this.wiki[id] !== undefined) return;
+    this.wiki[id] = "loading"; this.render(state.data);
+    try { this.wiki[id] = await wikiSummary(x.tags); } catch { this.wiki[id] = null; }
+    this.render(state.data);
+  }
+}
+customElements.define("walk-nearby", WalkNearby);
+
+/* =====================================================================
+   Controller
+   ===================================================================== */
+let watchId = null;
+async function loadWalk(gpxText, { force = false } = {}) {
+  const parsed = parseGPX(gpxText);
+  const key = "walk:route2:" + hashStr(JSON.stringify(parsed.route.map(p => [+p.lat.toFixed(5), +p.lon.toFixed(5)])));
+  store.set("walk:gpx", gpxText);
+  $("#title").textContent = parsed.name;
+  state.set({ name: parsed.name, points: parsed.route, highlights: parsed.highlights, route: null, pois: [], poisStatus: "idle", progress: 0, pos: null });
+  const overlay = $("#overlay"), ot = $("#overlayText");
+  let route = force ? null : store.get(key);
+  if (!route) {
+    overlay.classList.remove("hidden");
+    try {
+      route = await computeRoute(parsed.route, s => ot.textContent = s);
+      // don't cache the derived cum/d0/d1 (recomputed) — cache shape + maneuvers
+      store.set(key, { shape: route.shape, maneuvers: route.maneuvers.map(({ i0, i1, text, street, kind, len }) => ({ i0, i1, text, street, kind, len })), time: route.time, provider: route.provider });
+    } catch (e) {
+      console.error(e);
+      ot.innerHTML = `<b>Couldn't reach a routing service.</b><br>${esc(e.message)}<br><small>Check your connection, then try again.</small><br><button onclick="location.reload()">Retry</button>`;
+      return;
+    }
+  }
+  overlay.classList.add("hidden");
+  const enriched = route.enriched;
+  route = finishRoute(route.shape, route.maneuvers, route.time, route.provider);
+  $("#stat").textContent = `${fmtDist(route.length)} · ~${fmtTime(route.length / 1.3)}`;
+  state.set({ route });
+  setPreviewProgress(0);
+  if (!enriched) {
+    try {
+      const ways = await fetchNamedStreets(route.shape);
+      const r2 = enrichRoute(route, ways);
+      store.set(key, { shape: r2.shape, maneuvers: r2.maneuvers.map(({ i0, i1, text, street, kind, len }) => ({ i0, i1, text, street, kind, len })), time: r2.time, provider: r2.provider, enriched: true });
+      if (state.data.route === route) { state.set({ route: r2 }); setPreviewProgress(state.data.progress); }
+      route = r2;
+    } catch (e) { console.warn("street-name lookup failed", e); toast("Couldn't look up street names (OpenStreetMap busy) — try Recalculate later."); }
+  }
+  loadPOIs(route, key);
+}
+async function loadPOIs(route, key) {
+  const pk = key + ":pois";
+  const cached = store.get(pk);
+  if (cached && Date.now() - cached.t < 7 * 864e5) { state.set({ pois: cached.pois, poisStatus: "ok" }); return; }
+  state.set({ poisStatus: "loading" });
+  try { const pois = await fetchPOIs(route.shape); store.set(pk, { t: Date.now(), pois }); state.set({ pois, poisStatus: "ok" }); }
+  catch (e) { console.warn(e); state.set({ poisStatus: "error" }); }
+}
+function startGPS() {
+  if (!navigator.geolocation) { toast("Geolocation isn't available in this browser."); return; }
+  const btn = $("#gpsBtn"); btn.classList.add("busy");
+  let fresh = true;
+  watchId = navigator.geolocation.watchPosition(p => {
+    btn.classList.remove("busy"); btn.classList.add("on");
+    const pos = [p.coords.latitude, p.coords.longitude], r = state.data.route; if (!r) return;
+    const s = snapToRoute(r, pos, state.data.progress, fresh); fresh = false;
+    const off = s.dist > Math.max(45, (p.coords.accuracy || 0) * 0.8);
+    state.set({ mode: "gps", pos, accuracy: p.coords.accuracy, progress: off ? state.data.progress : s.prog, offRoute: off, offDist: s.dist, gps: true });
+  }, err => {
+    btn.classList.remove("busy");
+    toast(err.code === 1 ? "Location permission denied. Preview mode stays on." : "Couldn't get a GPS fix: " + err.message);
+    stopGPS();
+  }, { enableHighAccuracy: true, maximumAge: 2000, timeout: 20000 });
+  state.set({ mode: "gps", gps: true });
+  document.getElementById("map").setFollow(true);
+  if (navigator.wakeLock) navigator.wakeLock.request("screen").then(l => (window._wl = l)).catch(() => { });
+}
+function stopGPS() {
+  if (watchId != null) navigator.geolocation.clearWatch(watchId); watchId = null;
+  $("#gpsBtn").classList.remove("on", "busy");
+  window._wl?.release?.();
+  const r = state.data.route;
+  state.set({ mode: "preview", gps: false, offRoute: false, ...(r ? { pos: positionAt(r, state.data.progress).pos } : {}) });
+}
+$("#gpsBtn").onclick = () => state.data.gps ? stopGPS() : startGPS();
+$("#menuBtn").onclick = e => { e.stopPropagation(); $("#menuList").classList.toggle("open"); };
+document.addEventListener("click", e => { if (!e.target.closest(".menu")) $("#menuList").classList.remove("open"); });
+$("#gpxFile").onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  try { await loadWalk(await f.text()); toast(`Loaded ${f.name}`); } catch (err) { toast(err.message); }
+  e.target.value = "";
+};
+$("#exportBtn").onclick = () => {
+  const d = state.data; if (!d.route) return;
+  const blob = new Blob([toGPX(d.name, d.route.shape, d.highlights)], { type: "application/gpx+xml" });
+  const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: d.name.replace(/[^\w\-]+/g, "_") + "_snapped.gpx" });
+  document.body.appendChild(a); a.click(); a.remove();
+};
+$("#rerouteBtn").onclick = () => loadWalk(store.get("walk:gpx") || $("#default-gpx").textContent, { force: true });
+$("#resetBtn").onclick = () => { store.del("walk:gpx"); loadWalk($("#default-gpx").textContent); };
+$("#aboutBtn").onclick = () => alert(
+  "Paris Walk — a single-file walking companion.\n\n" +
+  "• Route points come from your GPX; footpath routing by Valhalla (valhalla1.openstreetmap.de), with OSRM foot (routing.openstreetmap.de) as fallback. Both are free community servers — be gentle with them.\n" +
+  "• Map tiles © OpenStreetMap contributors.\n" +
+  "• Sights along the route come from OpenStreetMap via Overpass; facts on tap come from Wikipedia. Curated facts for the built-in loop were written by hand.\n" +
+  "• Routes and sights are cached in this browser so the walk works with a flaky signal once loaded; map tiles still need a connection.\n" +
+  (state.data.route ? `\nCurrent route: ${state.data.route.provider}` : "")
+);
+
+// Boot: use the last imported GPX if any, otherwise the built-in loop
+loadWalk(store.get("walk:gpx") || $("#default-gpx").textContent);
+</script>
+</body>
+</html>
