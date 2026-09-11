@@ -92,11 +92,11 @@
   .dir-empty b { color: var(--ink); }
 
   /* ---------- preview scrubber ---------- */
-  .scrub { display: flex; align-items: center; gap: 10px; padding: 4px 14px 10px; font-size: 12px; color: var(--muted); }
+  .scrub { display: flex; align-items: center; gap: 6px; padding: 4px 10px 10px; font-size: 12px; color: var(--muted); }
   .scrub input[type=range] { flex: 1; accent-color: var(--accent); }
   .scrub button { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 6px 8px; font-size: 12px; white-space: nowrap; }
   .scrub input[type=range] { min-width: 60px; }
-  .scrub .lab { min-width: 64px; text-align: right; font-variant-numeric: tabular-nums; }
+  .scrub .lab { min-width: 44px; text-align: right; font-variant-numeric: tabular-nums; font-size: 11px; }
 
   /* ---------- map ---------- */
   walk-map { display: block; flex: 1; min-height: 160px; position: relative; }
@@ -115,8 +115,9 @@
   .leaflet-popup-content b { font-size: 14px; }
 
   /* ---------- nearby sheet ---------- */
-  walk-nearby { display: block; background: var(--panel); border-top: 1px solid var(--line); box-shadow: 0 -4px 16px rgba(0,0,0,.06); z-index: 950; transition: max-height .25s ease; max-height: 52px; overflow: hidden; }
-  walk-nearby.open { max-height: 46vh; }
+  walk-nearby { display: flex; flex-direction: column; flex-shrink: 0; background: var(--panel); border-top: 1px solid var(--line); box-shadow: 0 -4px 16px rgba(0,0,0,.06); z-index: 950; transition: max-height .25s ease; max-height: 52px; overflow: hidden; }
+  walk-nearby.open { max-height: 58vh; }
+  .sheet-head, .tabs { flex-shrink: 0; }
   .sheet-head { position: relative; display: flex; align-items: center; gap: 10px; height: 52px; padding: 0 14px; cursor: pointer; user-select: none; }
   .sheet-head .grip { width: 36px; height: 4px; border-radius: 2px; background: #d4d4d4; position: absolute; left: 50%; transform: translateX(-50%); top: 6px; }
   .sheet-head h2 { font-size: 15px; margin: 0; flex: 1; }
@@ -124,7 +125,12 @@
   .tabs { display: flex; gap: 4px; padding: 0 10px 8px; }
   .tabs button { border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 5px 12px; font-size: 13px; color: var(--muted); }
   .tabs button.on { background: #1f2937; color: #fff; border-color: #1f2937; }
-  .sheet-body { overflow-y: auto; max-height: calc(46vh - 92px); padding: 0 10px 12px; }
+  .sheet-body { overflow-y: auto; flex: 1; min-height: 0; padding: 0 10px 12px; -webkit-overflow-scrolling: touch; }
+  .sheet-head .close { border: 0; background: var(--bg); color: var(--ink); border-radius: 999px; width: 30px; height: 30px; font-size: 16px; display: none; place-items: center; }
+  walk-nearby.open .sheet-head .close { display: grid; }
+  walk-nearby.open .sheet-head #chev { display: none; }
+  .poi-head .caret { color: var(--muted); font-size: 11px; transition: transform .15s; }
+  .poi.open .poi-head .caret { transform: rotate(180deg); }
   .poi { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin-bottom: 8px; background: var(--panel); }
   .poi-head { display: flex; align-items: baseline; gap: 8px; cursor: pointer; }
   .poi-head .name { font-weight: 600; font-size: 14px; flex: 1; }
@@ -158,7 +164,7 @@
     walk-map { grid-row: 2; grid-column: 2; }
     walk-nearby { position: absolute; right: 12px; top: 64px; width: 360px; border-radius: var(--radius); border: 1px solid var(--line); box-shadow: var(--shadow); max-height: 52px; }
     walk-nearby.open { max-height: min(70vh, 720px); }
-    .sheet-body { max-height: calc(min(70vh, 720px) - 92px); }
+  
     .dir-list { gap: 8px; }
   }
 </style>
@@ -748,9 +754,9 @@ class WalkDirections extends HTMLElement {
       <ol class="dir-list" id="list"></ol>
       <div class="scrub" id="scrub">
         <button id="prevTurn" title="Previous turn">◀</button>
-        <button id="back" title="Back 100 m">−100 m</button>
+        <button id="back" title="Back 100 m">−100</button>
         <input type="range" id="range" min="0" max="1000" value="0" step="1">
-        <button id="fwd" title="Forward 100 m">+100 m</button>
+        <button id="fwd" title="Forward 100 m">+100</button>
         <button id="nextTurn" title="Next turn">▶</button>
         <span class="lab" id="lab">0 m</span>
       </div>`;
@@ -897,7 +903,7 @@ class WalkNearby extends HTMLElement {
   connectedCallback() {
     this.tab = "nearby"; this.openIds = new Set(); this.wiki = {};
     this.innerHTML = `
-      <div class="sheet-head" id="head"><div class="grip"></div><h2 id="sheetTitle">Nearby</h2><span class="count" id="count"></span><span id="chev">▲</span></div>
+      <div class="sheet-head" id="head"><div class="grip"></div><h2 id="sheetTitle">Nearby</h2><span class="count" id="count"></span><span id="chev">▲</span><button class="close" id="closeSheet" title="Hide">✕</button></div>
       <div class="tabs"><button data-tab="nearby" class="on">Nearby</button><button data-tab="highlights">Highlights</button><button data-tab="all">All sights</button></div>
       <div class="sheet-body" id="body"></div>`;
     $("#head", this).onclick = () => this.toggle();
@@ -905,11 +911,21 @@ class WalkNearby extends HTMLElement {
     state.on((d, patch) => {
       if ("pois" in patch || "route" in patch || "poisStatus" in patch) return this.render(d);
       if (("progress" in patch || "pos" in patch) && this.classList.contains("open")) {
-        clearTimeout(this._t); this._t = setTimeout(() => this.render(state.data), 1500); // throttle while walking
+        clearTimeout(this._t); this._t = setTimeout(() => this.refreshDistances(state.data), 1500); // throttle while walking
       }
     });
+    $("#closeSheet", this).onclick = e => { e.stopPropagation(); this.toggle(false); };
   }
-  toggle(force) { const open = force ?? !this.classList.contains("open"); this.classList.toggle("open", open); $("#chev", this).textContent = open ? "▼" : "▲"; }
+  toggle(force) { const open = force ?? !this.classList.contains("open"); this.classList.toggle("open", open); $("#chev", this).textContent = open ? "▼" : "▲"; if (open) this.render(state.data); }
+  refreshDistances(d) {
+    // update distance labels without rebuilding the DOM (a rebuild would swallow taps)
+    if (!d.pos) return;
+    this.querySelectorAll(".poi").forEach(el => {
+      const x = this._list?.find(i => i.id === el.dataset.id); if (!x) return;
+      const dist = haversine(d.pos, [x.lat, x.lon]); const lab = el.querySelector(".poi-head .dist");
+      if (lab) lab.textContent = fmtDist(dist);
+    });
+  }
   open(id) { this.toggle(true); this.tab = "all"; this.querySelectorAll(".tabs button").forEach(x => x.classList.toggle("on", x.dataset.tab === "all")); this.openIds.add(id); this.render(state.data); const el = this.querySelector(`[data-id="${CSS.escape(id)}"]`); el?.scrollIntoView({ block: "nearest" }); this.loadWiki(id); }
   items(d) {
     const pos = d.pos, prog = d.progress;
@@ -933,6 +949,7 @@ class WalkNearby extends HTMLElement {
       body.innerHTML = `<div class="sheet-empty">${d.poisStatus === "loading" ? "Looking up sights along the route…" : d.poisStatus === "error" ? "Couldn't load sights from OpenStreetMap (offline?). The curated highlights still work." : this.tab === "nearby" ? "Nothing within 220 m right now — keep walking, or check Highlights." : "Nothing found."}</div>`;
       return;
     }
+    this._list = list;
     body.innerHTML = list.map(x => {
       const w = this.wiki[x.id];
       const facts = (x.facts || []).map(f => `<p class="fact">${esc(f)}</p>`).join("");
@@ -942,7 +959,7 @@ class WalkNearby extends HTMLElement {
       const meta = [t.opening_hours ? `Hours: ${esc(t.opening_hours)}` : "", t["description:en"] ? esc(t["description:en"]) : "", t["inscription:en"] ? `“${esc(t["inscription:en"])}”` : "", t.website ? `<a href="${esc(t.website)}" target="_blank" rel="noopener">Website</a>` : ""].filter(Boolean).join(" · ");
       const hasWiki = t.wikipedia || t["wikipedia:en"] || t.wikidata;
       return `<div class="poi ${x.highlight ? "highlight" : ""} ${this.openIds.has(x.id) ? "open" : ""}" data-id="${esc(x.id)}">
-        <div class="poi-head"><span class="name">${x.order != null ? x.order + 1 + ". " : ""}${esc(x.name)}</span><span class="kind">${esc(x.kind)}</span>${x.dist != null ? `<span class="dist">${fmtDist(x.dist)}</span>` : ""}</div>
+        <div class="poi-head"><span class="name">${x.order != null ? x.order + 1 + ". " : ""}${esc(x.name)}</span><span class="kind">${esc(x.kind)}</span>${x.dist != null ? `<span class="dist">${fmtDist(x.dist)}</span>` : ""}<span class="caret">▼</span></div>
         <div class="poi-body">${x.desc ? `<p class="meta">${esc(x.desc)}</p>` : ""}${facts}${wikiHtml}${meta ? `<p class="meta">${meta}</p>` : ""}
           <div class="actions"><button data-act="map">Show on map</button>${hasWiki && w === undefined ? `<button data-act="wiki">Read more (Wikipedia)</button>` : ""}</div>
         </div></div>`;
