@@ -94,7 +94,8 @@
   /* ---------- preview scrubber ---------- */
   .scrub { display: flex; align-items: center; gap: 10px; padding: 4px 14px 10px; font-size: 12px; color: var(--muted); }
   .scrub input[type=range] { flex: 1; accent-color: var(--accent); }
-  .scrub button { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 4px 8px; font-size: 12px; }
+  .scrub button { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 6px 8px; font-size: 12px; white-space: nowrap; }
+  .scrub input[type=range] { min-width: 60px; }
   .scrub .lab { min-width: 64px; text-align: right; font-variant-numeric: tabular-nums; }
 
   /* ---------- map ---------- */
@@ -605,7 +606,7 @@ async function fetchPOIs(shape) {
     if (lat == null || !t.name) continue;
     const key = t.name.toLowerCase() + "|" + (t.wikidata || "");
     if (seen.has(key)) continue; seen.add(key);
-    out.push({ id: `${el.type}/${el.id}`, name: t["name:en"] || t.name, lat, lon, kind: poiKind(t), tags: t });
+    out.push({ id: `${el.type}/${el.id}`, name: t["name:en"] || t["int_name"] || t.name, lat, lon, kind: poiKind(t), tags: t });
   }
   return out;
 }
@@ -625,22 +626,41 @@ function poiKind(t) {
   return t.tourism || "sight";
 }
 async function wikiSummary(tags) {
-  let lang = "en", title = null;
-  if (tags["wikipedia:en"]) { title = tags["wikipedia:en"]; }
-  else if (tags.wikipedia) { const m = tags.wikipedia.match(/^(\w+):(.+)$/); if (m) { lang = m[1]; title = m[2]; } else title = tags.wikipedia; }
-  if (!title && tags.wikidata) {
-    // resolve via Wikidata sitelinks: prefer en, then fr
-    const r = await fetch(`https://www.wikidata.org/w/api.php?action=wbgetentities&ids=${encodeURIComponent(tags.wikidata)}&props=sitelinks&format=json&origin=*`);
+  const summary = async (lang, title) => {
+    const r = await fetch(`https://${lang}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title.replace(/ /g, "_"))}`);
     if (!r.ok) return null;
-    const ent = Object.values((await r.json()).entities || {})[0];
-    const sl = ent?.sitelinks || {};
-    if (sl.enwiki) { lang = "en"; title = sl.enwiki.title; } else if (sl.frwiki) { lang = "fr"; title = sl.frwiki.title; } else return null;
+    const j = await r.json();
+    if (!j.extract) return null;
+    return { extract: j.extract, thumb: j.thumbnail?.source, url: j.content_urls?.desktop?.page || j.content_urls?.mobile?.page, lang };
+  };
+  const tryEn = async title => { try { return await summary("en", title); } catch { return null; } };
+  // 1. explicit English article
+  if (tags["wikipedia:en"]) { const s = await tryEn(tags["wikipedia:en"]); if (s) return s; }
+  // 2. the wikipedia tag (usually fr:Title) — find the English equivalent through its language links
+  let lang = null, title = null;
+  if (tags.wikipedia) { const m = tags.wikipedia.match(/^(\w+):(.+)$/); if (m) { lang = m[1]; title = m[2]; } else { lang = "en"; title = tags.wikipedia; } }
+  if (title && lang === "en") { const s = await tryEn(title); if (s) return s; }
+  if (title && lang !== "en") {
+    try {
+      const r = await fetch(`https://${lang}.wikipedia.org/w/api.php?action=query&prop=langlinks&lllang=en&redirects=1&format=json&origin=*&titles=${encodeURIComponent(title)}`);
+      const j = r.ok ? await r.json() : null;
+      const en = Object.values(j?.query?.pages || {})[0]?.langlinks?.[0]?.["*"];
+      if (en) { const s = await tryEn(en); if (s) return s; }
+    } catch { }
   }
-  if (!title) return null;
-  const r = await fetch(`https://${lang}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title.replace(/ /g, "_"))}`);
-  if (!r.ok) return null;
-  const j = await r.json();
-  return { extract: j.extract, thumb: j.thumbnail?.source, url: j.content_urls?.desktop?.page || j.content_urls?.mobile?.page, lang };
+  // 3. Wikidata sitelinks → English article
+  if (tags.wikidata) {
+    try {
+      const r = await fetch(`https://www.wikidata.org/w/api.php?action=wbgetentities&ids=${encodeURIComponent(tags.wikidata)}&props=sitelinks&format=json&origin=*`);
+      const ent = r.ok ? Object.values((await r.json()).entities || {})[0] : null;
+      const sl = ent?.sitelinks || {};
+      if (sl.enwiki) { const s = await tryEn(sl.enwiki.title); if (s) return s; }
+      if (!title && sl.frwiki) { lang = "fr"; title = sl.frwiki.title; }
+    } catch { }
+  }
+  // 4. no English article: fall back to the original language
+  if (title && lang) { try { return await summary(lang, title); } catch { return null; } }
+  return null;
 }
 
 /* =====================================================================
@@ -727,20 +747,29 @@ class WalkDirections extends HTMLElement {
       <div class="dir-status"><span class="dot" id="dot"></span><span id="statusText">Preview mode</span><span class="spacer"></span><span id="remaining"></span></div>
       <ol class="dir-list" id="list"></ol>
       <div class="scrub" id="scrub">
+        <button id="prevTurn" title="Previous turn">◀</button>
         <button id="back" title="Back 100 m">−100 m</button>
         <input type="range" id="range" min="0" max="1000" value="0" step="1">
         <button id="fwd" title="Forward 100 m">+100 m</button>
+        <button id="nextTurn" title="Next turn">▶</button>
         <span class="lab" id="lab">0 m</span>
       </div>`;
     const range = $("#range", this);
     range.addEventListener("input", () => { const r = state.data.route; if (!r) return; setPreviewProgress(r.length * range.value / 1000); });
     $("#back", this).onclick = () => setPreviewProgress(Math.max(0, state.data.progress - 100));
     $("#fwd", this).onclick = () => setPreviewProgress(Math.min(state.data.route?.length || 0, state.data.progress + 100));
+    const jumpTurn = dir => {
+      const r = state.data.route; if (!r) return;
+      const p = state.data.progress, ms = r.maneuvers;
+      const target = dir > 0 ? ms.find(m => m.d0 > p + 8) : [...ms].reverse().find(m => m.d0 < p - 8);
+      if (target) setPreviewProgress(Math.max(0, target.d0 - 5));
+    };
+    $("#prevTurn", this).onclick = () => jumpTurn(-1);
+    $("#nextTurn", this).onclick = () => jumpTurn(1);
     state.on(d => this.render(d));
   }
   render(d) {
     const list = $("#list", this), dot = $("#dot", this), st = $("#statusText", this), rem = $("#remaining", this);
-    $("#scrub", this).classList.toggle("hidden", d.mode === "gps");
     if (!d.route) { list.innerHTML = `<li class="dir-empty">No route yet.</li>`; return; }
     const { current, list: up } = upcoming(d.route, d.progress, 3);
     const left = Math.max(0, d.route.length - d.progress);
@@ -749,7 +778,7 @@ class WalkDirections extends HTMLElement {
     $("#lab", this).textContent = fmtDist(d.progress);
     if (d.mode === "gps") {
       dot.className = "dot " + (d.pos ? (d.offRoute ? "off" : "live") : "");
-      st.textContent = !d.pos ? "Waiting for GPS…" : d.offRoute ? `Off route — ${fmtDist(d.offDist)} from the path` : (current?.street ? `On ${current.street}` : current?.towards ? `Heading to ${current.towards}` : "On route");
+      st.textContent = !d.pos ? "Waiting for GPS…" : d.offRoute ? `${fmtDist(d.offDist)} from the path — head back to the blue line` : (current?.street ? `On ${current.street}` : current?.towards ? `Heading to ${current.towards}` : "On route");
     } else {
       dot.className = "dot";
       st.textContent = current?.street ? `Preview · on ${current.street}` : current?.towards ? `Preview · heading to ${current.towards}` : "Preview — drag the slider or tap the map to move";
@@ -781,6 +810,7 @@ customElements.define("walk-directions", WalkDirections);
 
 function setPreviewProgress(p) {
   const r = state.data.route; if (!r) return;
+  if (state.data.mode === "gps") { state.set({ progress: p }); return; } // GPS keeps the real position; it continues from here
   const { pos } = positionAt(r, p);
   state.set({ progress: p, pos, offRoute: false, offDist: 0 });
 }
@@ -907,9 +937,9 @@ class WalkNearby extends HTMLElement {
       const w = this.wiki[x.id];
       const facts = (x.facts || []).map(f => `<p class="fact">${esc(f)}</p>`).join("");
       const wikiHtml = w === undefined ? "" : w === null ? `<p class="meta">No Wikipedia article found.</p>` : w === "loading" ? `<p class="meta">Loading facts…</p>` :
-        `${w.thumb ? `<img src="${esc(w.thumb)}" alt="">` : ""}<p class="fact">${esc(w.extract)}</p><p class="meta"><a href="${esc(w.url)}" target="_blank" rel="noopener">Wikipedia (${w.lang})</a></p>`;
+        `${w.thumb ? `<img src="${esc(w.thumb)}" alt="">` : ""}<p class="fact">${esc(w.extract)}</p><p class="meta"><a href="${esc(w.url)}" target="_blank" rel="noopener">Wikipedia${w.lang !== "en" ? ` (no English article — ${w.lang.toUpperCase()} shown)` : ""}</a></p>`;
       const t = x.tags || {};
-      const meta = [t.opening_hours ? `Hours: ${esc(t.opening_hours)}` : "", t.description ? esc(t.description) : "", t.inscription ? `“${esc(t.inscription)}”` : "", t.website ? `<a href="${esc(t.website)}" target="_blank" rel="noopener">Website</a>` : ""].filter(Boolean).join(" · ");
+      const meta = [t.opening_hours ? `Hours: ${esc(t.opening_hours)}` : "", t["description:en"] ? esc(t["description:en"]) : "", t["inscription:en"] ? `“${esc(t["inscription:en"])}”` : "", t.website ? `<a href="${esc(t.website)}" target="_blank" rel="noopener">Website</a>` : ""].filter(Boolean).join(" · ");
       const hasWiki = t.wikipedia || t["wikipedia:en"] || t.wikidata;
       return `<div class="poi ${x.highlight ? "highlight" : ""} ${this.openIds.has(x.id) ? "open" : ""}" data-id="${esc(x.id)}">
         <div class="poi-head"><span class="name">${x.order != null ? x.order + 1 + ". " : ""}${esc(x.name)}</span><span class="kind">${esc(x.kind)}</span>${x.dist != null ? `<span class="dist">${fmtDist(x.dist)}</span>` : ""}</div>
@@ -985,17 +1015,24 @@ async function loadPOIs(route, key) {
 }
 function startGPS() {
   if (!navigator.geolocation) { toast("Geolocation isn't available in this browser."); return; }
+  if (location.protocol === "file:" || !window.isSecureContext) {
+    alert("Browsers refuse location access to pages opened straight from a file (file://) or over plain http.\n\nTo use GPS, open this file from an https address (e.g. GitHub Pages, Netlify Drop, your own web server) or, on a computer, from http://localhost.\n\nPreview mode still works: drag the slider or tap the route to move along the walk.");
+    return;
+  }
   const btn = $("#gpsBtn"); btn.classList.add("busy");
   let fresh = true;
   watchId = navigator.geolocation.watchPosition(p => {
     btn.classList.remove("busy"); btn.classList.add("on");
     const pos = [p.coords.latitude, p.coords.longitude], r = state.data.route; if (!r) return;
-    const s = snapToRoute(r, pos, state.data.progress, fresh); fresh = false;
+    const s = snapToRoute(r, pos, state.data.progress, fresh);
     const off = s.dist > Math.max(45, (p.coords.accuracy || 0) * 0.8);
-    state.set({ mode: "gps", pos, accuracy: p.coords.accuracy, progress: off ? state.data.progress : s.prog, offRoute: off, offDist: s.dist, gps: true });
+    const follow = fresh || s.dist < 150; // only freeze progress when far from the whole route
+    fresh = false;
+    state.set({ mode: "gps", pos, accuracy: p.coords.accuracy, progress: follow ? s.prog : state.data.progress, offRoute: off, offDist: s.dist, gps: true });
   }, err => {
     btn.classList.remove("busy");
-    toast(err.code === 1 ? "Location permission denied. Preview mode stays on." : "Couldn't get a GPS fix: " + err.message);
+    if (err.code === 1) alert("Location permission was denied.\n\nCheck the site's location permission in the browser (the padlock/aA icon in the address bar) and that Location Services are on for the browser in the phone's settings, then tap GPS again.\n\nPreview mode keeps working in the meantime.");
+    else toast("Couldn't get a GPS fix: " + err.message);
     stopGPS();
   }, { enableHighAccuracy: true, maximumAge: 2000, timeout: 20000 });
   state.set({ mode: "gps", gps: true });
