@@ -237,6 +237,7 @@
       <label>Import a GPX file<small>Route / track points are snapped to footpaths</small><input type="file" id="gpxFile" accept=".gpx,application/gpx+xml" hidden></label>
       <button id="exportBtn">Export road-snapped GPX<small>Load it in any app that follows a track</small></button>
       <hr>
+      <button id="gkeyBtn">Google Places key…<small id="gkeyState">Optional: better place lookup for New walk</small></button>
       <button id="rerouteBtn">Recalculate route<small>Clears the cached route and fetches again</small></button>
       <button id="resetBtn">Reset to the built-in Paris loop</button>
       <hr>
@@ -1338,7 +1339,22 @@ function stopGPS() {
 /* ---------- New walk planner: names in, geocoded stops out ---------- */
 const PHOTON = "https://photon.komoot.io/api/";
 const NOMINATIM = "https://nominatim.openstreetmap.org/search";
+const GPLACES = "https://places.googleapis.com/v1/places:searchText";
+function googleKey() { try { return localStorage.getItem("walk:gkey") || ""; } catch { return ""; } }
+async function geocodeGoogle(q, bias) {
+  const key = googleKey(); if (!key) return null;
+  const body = { textQuery: q, languageCode: "en", pageSize: 1 };
+  if (bias) body.locationBias = { circle: { center: { latitude: bias[0], longitude: bias[1] }, radius: 25000 } };
+  const r = await fetch(GPLACES, { method: "POST", headers: { "Content-Type": "application/json", "X-Goog-Api-Key": key, "X-Goog-FieldMask": "places.displayName,places.location,places.formattedAddress" }, body: JSON.stringify(body) });
+  if (!r.ok) { const t = await r.text().catch(() => ""); throw new Error(`Google Places ${r.status}: ${t.slice(0, 160)}`); }
+  const pl = (await r.json()).places?.[0]; if (!pl?.location) return null;
+  return { lat: pl.location.latitude, lon: pl.location.longitude, label: [pl.displayName?.text, (pl.formattedAddress || "").split(",")[0]].filter((x, i, a) => x && a.indexOf(x) === i).join(", "), source: "google" };
+}
 async function geocode(q, bias) {
+  if (googleKey()) {
+    try { const g = await geocodeGoogle(q, bias); if (g) return g; }
+    catch (e) { console.warn(e); if (!geocode._warned) { geocode._warned = true; toast("Google Places lookup failed (check the key and its referrer restriction) — using OpenStreetMap instead."); } }
+  }
   try {
     const u = `${PHOTON}?q=${encodeURIComponent(q)}&limit=1&lang=en${bias ? `&lat=${bias[0]}&lon=${bias[1]}` : ""}`;
     const r = await fetch(u); if (r.ok) { const f = (await r.json()).features?.[0]; if (f) { const pr = f.properties || {}; return { lat: f.geometry.coordinates[1], lon: f.geometry.coordinates[0], label: [pr.name, pr.street && pr.name !== pr.street ? pr.street : "", pr.city].filter(Boolean).join(", ") }; } }
@@ -1375,6 +1391,7 @@ const planner = {
     fresh.forEach(st => { const old = this.stops.find(o => o.text === st.text && o.lat != null); if (old) Object.assign(st, { lat: old.lat, lon: old.lon, status: old.status, label: old.label }); });
     this.stops = fresh; this.busy = true; this.render();
     let bias = null;
+    $("#planStatus").textContent = googleKey() ? "Looking up places with Google Places…" : "Looking up places with OpenStreetMap…";
     if (city) { const c = await geocode(city); if (c) bias = [c.lat, c.lon]; }
     for (const st of this.stops) {
       if (st.lat != null) continue;
@@ -1435,6 +1452,15 @@ const planner = {
     $("#planBuild").disabled = this.busy || this.stops.filter(s => s.lat != null).length < 2;
     $("#planFind").disabled = this.busy;
   }
+};
+function refreshKeyState() { $("#gkeyState").textContent = googleKey() ? "Set — New walk uses Google Places (tap to change or clear)" : "Optional: better place lookup for New walk"; }
+refreshKeyState();
+$("#gkeyBtn").onclick = () => {
+  const cur = googleKey();
+  const v = prompt("Google Places API key (stored only in this browser, never in the file).\n\nCreate one in Google Cloud with the Places API (New) enabled, restricted to this site's address and to the Places API. Leave empty to remove.", cur);
+  if (v === null) return;
+  try { if (v.trim()) localStorage.setItem("walk:gkey", v.trim()); else localStorage.removeItem("walk:gkey"); } catch { }
+  geocode._warned = false; refreshKeyState(); toast(v.trim() ? "Google Places lookups enabled" : "Using OpenStreetMap lookups");
 };
 $("#newWalkBtn").onclick = () => planner.open();
 $("#planClose").onclick = () => planner.close();
