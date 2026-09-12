@@ -204,6 +204,21 @@
     #planner { grid-row: 2; grid-column: 1; max-height: none; border-right: 1px solid var(--line); border-bottom: 0; }
   }
 
+  /* ---------- library ---------- */
+  #library { display: none; flex-direction: column; background: var(--panel); border-bottom: 1px solid var(--line); max-height: 70vh; flex-shrink: 0; }
+  body.library #library { display: flex; }
+  body.library walk-directions, body.library walk-nearby, body.library .map-note { display: none !important; }
+  .lib-list { list-style: none; margin: 0; padding: 0 12px 12px; display: flex; flex-direction: column; gap: 6px; }
+  .lib-item { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+  .lib-item.current { border-color: var(--accent); background: #eff6ff; }
+  .lib-item .t { font-weight: 600; font-size: 14px; }
+  .lib-item .m { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .lib-item .acts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .lib-item .acts button { border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 8px; padding: 5px 10px; font-size: 12px; }
+  .lib-item .acts button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .lib-item .acts button.danger { color: #b91c1c; }
+  @media (min-width: 900px) { #library { grid-row: 2; grid-column: 1; max-height: none; border-right: 1px solid var(--line); border-bottom: 0; } }
+
   /* ---------- toast / overlay ---------- */
   .toast { position: fixed; left: 50%; bottom: 70px; transform: translateX(-50%); background: #111827; color: #fff; padding: 10px 14px; border-radius: 10px; font-size: 13px; z-index: 2000; box-shadow: var(--shadow); max-width: 90vw; opacity: 0; transition: opacity .2s; pointer-events: none; }
   .toast.show { opacity: 1; }
@@ -238,8 +253,10 @@
   <div class="menu">
     <button id="menuBtn" title="More">⋯</button>
     <div class="menu-list" id="menuList">
+      <button id="libraryBtn">My walks…<small>Saved walks: open, edit, import GPX</small></button>
       <button id="newWalkBtn">New walk…<small>Paste a list of places (from an AI or your own) or tap stops on the map</small></button>
-      <label>Import a GPX file<small>Route / track points are snapped to footpaths</small><input type="file" id="gpxFile" accept=".gpx,application/gpx+xml" hidden></label>
+      <button id="editWalkBtn">Edit this walk<small>Open its stops in the planner</small></button>
+      <button id="copyAiBtn">Copy walk for AI editing<small>Stops + a prompt that keeps the format</small></button>
       <button id="exportBtn">Export road-snapped GPX<small>Load it in any app that follows a track</small></button>
       <hr>
       <button id="gkeyBtn">Google Places key…<small id="gkeyState">Optional: better place lookup for New walk</small></button>
@@ -270,6 +287,11 @@
     <button id="planFind" class="primary">Find places</button>
     <button id="planBuild" class="primary go" disabled>Build &amp; start walk</button>
   </div>
+</div>
+<div id="library">
+  <div class="plan-head"><h2>My walks</h2><button class="close" id="libClose" title="Close">✕</button></div>
+  <div class="plan-body"><ol class="lib-list" id="libList"></ol></div>
+  <div class="plan-foot"><button id="libNew" class="primary">New walk…</button><input type="file" id="gpxFile" accept=".gpx,application/gpx+xml" hidden><button id="libImport" style="margin-left:auto">Import GPX</button></div>
 </div>
 <walk-directions id="directions"></walk-directions>
 <walk-map id="map"></walk-map>
@@ -1187,10 +1209,41 @@ customElements.define("walk-nearby", WalkNearby);
    Controller
    ===================================================================== */
 let watchId = null;
-async function loadWalk(gpxText, { force = false } = {}) {
+/* ---------- library of walks (localStorage) ---------- */
+const library = {
+  list() { return store.get("walk:library") || []; },
+  save(list) { store.set("walk:library", list); },
+  get(id) { return this.list().find(w => w.id === id); },
+  upsert(entry) {
+    const list = this.list(), i = list.findIndex(w => w.id === entry.id), now = Date.now();
+    if (i >= 0) list[i] = { ...list[i], ...entry, updated: now }; else list.push({ created: now, updated: now, ...entry });
+    this.save(list); return entry.id;
+  },
+  remove(id) { this.save(this.list().filter(w => w.id !== id)); if (store.get("walk:currentId") === id) store.del("walk:currentId"); },
+  current() { return this.get(store.get("walk:currentId")); }
+};
+/* The stops of a walk as the planner's line format (Start: …, Name — note). */
+function stopsText(entry) {
+  const stops = entry.stops?.length ? entry.stops : (() => { try { const p = parseGPX(entry.gpx); return (p.highlights.length ? p.highlights : p.route.filter(x => x.name)).map(h => ({ name: h.name, desc: h.desc })); } catch { return []; } })();
+  return stops.map((st, i) => `${i === 0 ? "Start: " : ""}${st.name}${st.desc ? " — " + st.desc : ""}`).join("\n");
+}
+function aiEditPrompt(entry) {
+  const city = entry.city || $("#planCity").value.trim() || "the city";
+  return `Here is my current walking route in ${city}, in walking order, one stop per line ("Place name — note"):\n\n${stopsText(entry)}\n\nPlease modify it as follows: [describe the change — e.g. "swap Montmartre for the Marais and keep it under 8 km", "add two food stops", "make it start and end at my hotel"].\n\nReply with ONLY the complete updated list in exactly the same format: one stop per line as "Place name — one sentence on why it is worth stopping", using the exact searchable name of each place, in walking order, keeping the first line as "Start: …". No numbering, no coordinates, no introduction or closing text.`;
+}
+async function copyText(text, okMsg) {
+  try { await navigator.clipboard.writeText(text); toast(okMsg); }
+  catch { prompt("Copy this text:", text); }
+}
+async function loadWalk(gpxText, { force = false, id = null, city = "", stops = null } = {}) {
   const parsed = parseGPX(gpxText);
   const key = "walk:route2:" + hashStr(JSON.stringify(parsed.route.map(p => [+p.lat.toFixed(5), +p.lon.toFixed(5)])));
   store.set("walk:gpx", gpxText);
+  // remember it in the library
+  const wid = id || "gpx:" + hashStr(gpxText);
+  const existing = library.get(wid);
+  library.upsert({ id: wid, name: parsed.name, gpx: gpxText, city: city || existing?.city || "", stops: stops || existing?.stops || parsed.highlights.map(h => ({ name: h.name, desc: h.desc, lat: h.lat, lon: h.lon })) });
+  store.set("walk:currentId", wid);
   $("#title").textContent = parsed.name;
   state.set({ name: parsed.name, points: parsed.route, highlights: parsed.highlights, route: null, pois: [], poisStatus: "idle", progress: 0, pos: null });
   const overlay = $("#overlay"), ot = $("#overlayText");
@@ -1212,6 +1265,7 @@ async function loadWalk(gpxText, { force = false } = {}) {
   if (enriched) fetchNamedStreets(route.shape).then(ways => state.set({ ways })).catch(() => { });
   route = finishRoute(route.shape, route.maneuvers, route.time, route.provider);
   $("#stat").textContent = `${fmtDist(route.length)} · ~${fmtTime(route.length / 1.3)}`;
+  library.upsert({ id: wid, length: route.length });
   state.set({ route, roadside: buildRoadside(route, parsed.highlights, []) });
   setPreviewProgress(0);
   if (!enriched) {
@@ -1378,11 +1432,29 @@ async function geocode(q, bias) {
 const planner = {
   stops: [], tapMode: false, busy: false,
   open() {
-    document.body.classList.add("planning"); document.body.classList.remove("map-full");
-    if (!$("#planName").value) $("#planName").value = "";
+    document.body.classList.add("planning"); document.body.classList.remove("map-full", "library");
+    if (!this.restored) { this.restore(); this.restored = true; }
     this.render(); document.getElementById("map").setPlanPins(this.stops);
   },
   close() { document.body.classList.remove("planning"); document.getElementById("map").planLayer.clearLayers(); document.getElementById("map").fit(); },
+  /* everything typed or found is kept in localStorage so a refresh loses nothing */
+  saveDraft() {
+    store.set("walk:plannerDraft", { name: $("#planName").value, city: $("#planCity").value, text: $("#planText").value, km: $("#planKm").value, loop: $("#planLoop").checked, stops: this.stops, editId: this.editId || null });
+  },
+  restore() {
+    const d = store.get("walk:plannerDraft"); if (!d) return;
+    $("#planName").value = d.name || ""; $("#planCity").value = d.city || "Paris"; $("#planText").value = d.text || ""; $("#planKm").value = d.km || 8; $("#planLoop").checked = d.loop !== false;
+    this.stops = d.stops || []; this.editId = d.editId || null;
+  },
+  /* load an existing walk's stops for editing */
+  edit(entry) {
+    this.restored = true; this.editId = entry.id === "builtin" ? null : entry.id; // the built-in loop is never overwritten
+    $("#planName").value = entry.id === "builtin" ? "Paris loop (edited)" : (entry.name || ""); $("#planCity").value = entry.city || $("#planCity").value || "Paris";
+    const stops = entry.stops?.length ? entry.stops : [];
+    this.stops = stops.map((st, i) => ({ text: `${i === 0 ? "Start: " : ""}${st.name}${st.desc ? " — " + st.desc : ""}`, name: st.name, desc: st.desc || "", start: i === 0, lat: st.lat ?? null, lon: st.lon ?? null, status: st.lat != null ? "ok" : "pending", label: st.lat != null ? "from saved walk" : "" }));
+    $("#planText").value = stopsText(entry);
+    this.saveDraft(); this.open();
+  },
   parse(text) {
     return text.split(/\n/).map(l => l.trim()).filter(Boolean).map(l => {
       let start = false;
@@ -1398,7 +1470,7 @@ const planner = {
     const fresh = this.parse($("#planText").value);
     // keep coordinates of stops the user already fixed by dragging
     fresh.forEach(st => { const old = this.stops.find(o => o.text === st.text && o.lat != null); if (old) Object.assign(st, { lat: old.lat, lon: old.lon, status: old.status, label: old.label }); });
-    this.stops = fresh; this.busy = true; this.render();
+    this.stops = fresh; this.busy = true; this.render(); this.saveDraft();
     let bias = null;
     $("#planStatus").textContent = googleKey() ? "Looking up places with Google Places…" : "Looking up places with OpenStreetMap…";
     if (city) { const c = await geocode(city); if (c) bias = [c.lat, c.lon]; }
@@ -1411,7 +1483,7 @@ const planner = {
       else st.status = "missing";
       this.render(); document.getElementById("map").setPlanPins(this.stops);
     }
-    this.busy = false;
+    this.busy = false; this.saveDraft();
     const missing = this.stops.filter(s => s.status === "missing").length;
     $("#planStatus").textContent = missing ? `${missing} not found — rephrase them (add the street or district) or tap the map to place them.` : "Check the pins, drag any that are off, then build the route.";
     this.render();
@@ -1424,14 +1496,17 @@ const planner = {
       const pr = j.features?.[0]?.properties; const st = this.stops[n - 1];
       if (pr && st && st.name === `Stop ${n}`) { st.name = pr.name || [pr.housenumber, pr.street].filter(Boolean).join(" ") || st.name; st.label = pr.city || ""; this.render(); document.getElementById("map").setPlanPins(this.stops); }
     }).catch(() => { });
-    this.render(); document.getElementById("map").setPlanPins(this.stops);
+    this.syncText(); this.render(); document.getElementById("map").setPlanPins(this.stops); this.saveDraft();
   },
-  moved(i, lat, lon) { const st = this.stops[i]; if (!st) return; st.lat = lat; st.lon = lon; st.status = "ok"; st.label = "moved by hand"; this.render(); },
-  remove(i) { this.stops.splice(i, 1); this.render(); document.getElementById("map").setPlanPins(this.stops); },
-  move(i, dir) { const j = i + dir; if (j < 0 || j >= this.stops.length) return; [this.stops[i], this.stops[j]] = [this.stops[j], this.stops[i]]; this.render(); document.getElementById("map").setPlanPins(this.stops); },
+  moved(i, lat, lon) { const st = this.stops[i]; if (!st) return; st.lat = lat; st.lon = lon; st.status = "ok"; st.label = "moved by hand"; this.render(); this.saveDraft(); },
+  remove(i) { this.stops.splice(i, 1); this.syncText(); this.render(); document.getElementById("map").setPlanPins(this.stops); this.saveDraft(); },
+  move(i, dir) { const j = i + dir; if (j < 0 || j >= this.stops.length) return; [this.stops[i], this.stops[j]] = [this.stops[j], this.stops[i]]; this.syncText(); this.render(); document.getElementById("map").setPlanPins(this.stops); this.saveDraft(); },
+  syncText() { $("#planText").value = this.stops.map((st, i) => `${i === 0 ? "Start: " : ""}${st.name}${st.desc ? " — " + st.desc : ""}`).join("\n"); },
   prompt() {
     const city = $("#planCity").value.trim() || "the city";
-    const first = this.parse($("#planText").value)[0];
+    const lines = this.parse($("#planText").value);
+    if (lines.length >= 2) return aiEditPrompt({ city, stops: lines.map(l => ({ name: l.name, desc: l.desc })) });
+    const first = lines[0];
     const start = first ? first.name : "[start address]";
     const km = $("#planKm").value || 8, loop = $("#planLoop").checked;
     return `Plan a sightseeing walking route in ${city} starting at ${start}, about ${km} km${loop ? ", finishing back at the start" : ""}. Reply with ONLY a plain list of stops in walking order, one per line, in exactly this format:\n\nPlace name — one sentence on why it is worth stopping\n\nUse the exact, searchable name of each place as it appears on a map (for example "Pont Neuf" or "Place des Vosges"), 8 to 14 stops, and include a stop at any street or square worth walking along so the route follows an interesting path rather than the shortest one. No numbering, no coordinates, no introduction or closing text.`;
@@ -1445,8 +1520,12 @@ const planner = {
     const gpx = `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="Paris Walk planner" xmlns="http://www.topografix.com/GPX/1/1">\n  <metadata><name>${esc(name)}</name></metadata>\n` +
       stops.map(s => `  <wpt lat="${s.lat.toFixed(6)}" lon="${s.lon.toFixed(6)}"><name>${esc(s.name)}</name>${s.desc ? `<desc>${esc(s.desc)}</desc>` : ""}</wpt>`).join("\n") +
       `\n  <rte><name>${esc(name)}</name>\n` + rte.map(s => `    <rtept lat="${s.lat.toFixed(6)}" lon="${s.lon.toFixed(6)}"><name>${esc(s.name)}</name></rtept>`).join("\n") + `\n  </rte>\n</gpx>\n`;
+    const id = this.editId || "plan:" + Date.now().toString(36);
+    const saved = stops.map(s => ({ name: s.name, desc: s.desc, lat: s.lat, lon: s.lon }));
     this.close();
-    loadWalk(gpx).catch(e => toast(e.message));
+    store.del("walk:plannerDraft"); this.restored = false; this.editId = null; this.stops = [];
+    $("#planText").value = ""; $("#planName").value = "";
+    loadWalk(gpx, { id, city: $("#planCity").value.trim(), stops: saved }).catch(e => toast(e.message));
   },
   render() {
     const ol = $("#planStops");
@@ -1472,6 +1551,38 @@ $("#gkeyBtn").onclick = () => {
   geocode._warned = false; refreshKeyState(); toast(v.trim() ? "Google Places lookups enabled" : "Using OpenStreetMap lookups");
 };
 $("#newWalkBtn").onclick = () => planner.open();
+["#planName", "#planCity", "#planText", "#planKm", "#planLoop"].forEach(sel => $(sel).addEventListener("input", () => planner.saveDraft()));
+/* ---------- library panel ---------- */
+const libraryPanel = {
+  open() { document.body.classList.add("library"); document.body.classList.remove("planning", "map-full"); this.render(); },
+  close() { document.body.classList.remove("library"); },
+  render() {
+    const cur = store.get("walk:currentId");
+    const list = library.list().sort((a, b) => (b.updated || 0) - (a.updated || 0));
+    $("#libList").innerHTML = list.length ? list.map(w => `<li class="lib-item ${w.id === cur ? "current" : ""}" data-id="${esc(w.id)}">
+        <div class="t">${esc(w.name)}</div>
+        <div class="m">${[w.city, w.length ? fmtDist(w.length) : "", (w.stops?.length ? w.stops.length + " stops" : ""), new Date(w.updated || w.created).toLocaleDateString()].filter(Boolean).join(" · ")}${w.id === cur ? " · current" : ""}</div>
+        <div class="acts">${w.id === cur ? "" : `<button data-act="open" class="primary">Open</button>`}<button data-act="edit">Edit stops</button><button data-act="ai">Copy for AI</button><button data-act="gpx">GPX</button>${w.id === "builtin" ? "" : `<button data-act="del" class="danger">Delete</button>`}</div>
+      </li>`).join("") : `<li class="sheet-empty">No saved walks yet.</li>`;
+    $("#libList").querySelectorAll(".lib-item").forEach(li => {
+      const w = library.get(li.dataset.id); if (!w) return;
+      li.querySelectorAll("button").forEach(b => b.onclick = () => {
+        const act = b.dataset.act;
+        if (act === "open") { this.close(); loadWalk(w.gpx, { id: w.id, city: w.city, stops: w.stops }).catch(e => toast(e.message)); }
+        else if (act === "edit") { this.close(); planner.edit(w); }
+        else if (act === "ai") copyText(aiEditPrompt(w), "Copied — paste into your AI, describe the change, then paste its answer into New walk.");
+        else if (act === "gpx") { const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(new Blob([w.gpx], { type: "application/gpx+xml" })), download: w.name.replace(/[^\w\-]+/g, "_") + ".gpx" }); document.body.appendChild(a); a.click(); a.remove(); }
+        else if (act === "del") { if (confirm(`Delete "${w.name}"?`)) { library.remove(w.id); this.render(); } }
+      });
+    });
+  }
+};
+$("#libraryBtn").onclick = () => libraryPanel.open();
+$("#libClose").onclick = () => libraryPanel.close();
+$("#libNew").onclick = () => { libraryPanel.close(); planner.open(); };
+$("#libImport").onclick = () => $("#gpxFile").click();
+$("#editWalkBtn").onclick = () => { const w = library.current(); if (w) planner.edit(w); else toast("No walk loaded yet."); };
+$("#copyAiBtn").onclick = () => { const w = library.current(); if (w) copyText(aiEditPrompt(w), "Copied — paste into your AI, describe the change, then paste its answer into New walk."); };
 $("#planClose").onclick = () => planner.close();
 $("#planFind").onclick = () => planner.find();
 $("#planBuild").onclick = () => planner.build();
@@ -1496,7 +1607,7 @@ $("#exportBtn").onclick = () => {
   document.body.appendChild(a); a.click(); a.remove();
 };
 $("#rerouteBtn").onclick = () => loadWalk(store.get("walk:gpx") || $("#default-gpx").textContent, { force: true });
-$("#resetBtn").onclick = () => { store.del("walk:gpx"); loadWalk($("#default-gpx").textContent); };
+$("#resetBtn").onclick = () => { store.del("walk:gpx"); loadWalk($("#default-gpx").textContent, { id: "builtin", city: "Paris" }); };
 $("#aboutBtn").onclick = () => alert(
   "Paris Walk — a single-file walking companion.\n\n" +
   "• Route points come from your GPX; footpath routing by Valhalla (valhalla1.openstreetmap.de), with OSRM foot (routing.openstreetmap.de) as fallback. Both are free community servers — be gentle with them.\n" +
@@ -1506,8 +1617,13 @@ $("#aboutBtn").onclick = () => alert(
   (state.data.route ? `\nCurrent route: ${state.data.route.provider}` : "")
 );
 
-// Boot: use the last imported GPX if any, otherwise the built-in loop
-loadWalk(store.get("walk:gpx") || $("#default-gpx").textContent);
+// Boot: the current library walk, else the last GPX, else the built-in loop (always kept in the library)
+if (!library.get("builtin")) library.upsert({ id: "builtin", name: "Paris: Rue Guénégaud – Montmartre – Notre-Dame Loop", city: "Paris", gpx: $("#default-gpx").textContent.trim(), stops: parseGPX($("#default-gpx").textContent).highlights.map(h => ({ name: h.name, desc: h.desc, lat: h.lat, lon: h.lon })) });
+{
+  const cur = library.current();
+  if (cur) loadWalk(cur.gpx, { id: cur.id, city: cur.city, stops: cur.stops });
+  else loadWalk(store.get("walk:gpx") || $("#default-gpx").textContent, store.get("walk:gpx") ? {} : { id: "builtin", city: "Paris" });
+}
 </script>
 </body>
 </html>
