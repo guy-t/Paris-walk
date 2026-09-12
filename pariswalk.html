@@ -85,10 +85,28 @@
   .dir-item .main b.road { font-weight: 800; color: #111827; }
   .dir-item:not(.primary) .main b.road { font-weight: 700; }
   .dir-item .main .towards { color: var(--muted); font-weight: 500; }
+  .dir-item.sight { background: #fffbeb; }
+  .dir-item.sight .icon { background: #f59e0b; color: #fff; width: 34px; height: 34px; margin-left: 5px; }
+  .dir-item.sight .text .main { font-weight: 600; font-size: 14px; color: #92400e; }
+  .dir-item.sight .dist { font-size: 13px; font-weight: 600; color: #92400e; }
   .dir-item .text .sub { font-size: 12px; color: var(--muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .dir-item .dist { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 18px; text-align: right; white-space: nowrap; }
   .dir-item:not(.primary) .dist { font-size: 13px; font-weight: 600; color: var(--muted); }
   .dir-empty { padding: 18px 14px; color: var(--muted); font-size: 14px; }
+  .dir-status .iconbtn { border: 0; background: var(--bg); color: var(--muted); border-radius: 999px; width: 26px; height: 26px; font-size: 12px; display: grid; place-items: center; margin-left: 6px; }
+  /* compact: only the status line and the next instruction */
+  walk-directions.compact .dir-list li:not(.primary), walk-directions.compact .scrub { display: none; }
+  walk-directions.compact .dir-list { padding-bottom: 6px; }
+  walk-directions.compact .dir-item.primary { padding: 6px 8px; }
+  walk-directions.compact .dir-item.primary .icon { width: 36px; height: 36px; }
+  walk-directions.compact .dir-item.primary .text .main { font-size: 16px; }
+  walk-directions.compact .dir-item.primary .dist { font-size: 16px; }
+  /* full-screen map: header and sights hidden, directions float over the map */
+  body.map-full { display: flex; flex-direction: column; }
+  body.map-full header.bar, body.map-full walk-nearby, body.map-full .map-note { display: none !important; }
+  body.map-full walk-map { flex: 1; }
+  body.map-full walk-directions { position: absolute; top: max(8px, env(safe-area-inset-top)); left: 8px; right: 8px; z-index: 1000; border-radius: 14px; border: 0; box-shadow: var(--shadow); overflow: hidden; }
+  body.map-full walk-directions .dir-status { padding-top: 6px; }
   .dir-empty b { color: var(--ink); }
 
   /* ---------- preview scrubber ---------- */
@@ -146,6 +164,7 @@
   .poi-body .actions button { border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 5px 10px; font-size: 12px; }
   .poi.highlight { border-color: #fcd34d; background: #fffbeb; }
   .sheet-empty { color: var(--muted); font-size: 13px; padding: 12px 6px; }
+  .show-more { display: block; width: 100%; border: 1px dashed var(--line); background: var(--bg); color: var(--muted); border-radius: 10px; padding: 10px; font-size: 13px; margin: 4px 0 8px; }
 
   /* ---------- toast / overlay ---------- */
   .toast { position: fixed; left: 50%; bottom: 70px; transform: translateX(-50%); background: #111827; color: #fff; padding: 10px 14px; border-radius: 10px; font-size: 13px; z-index: 2000; box-shadow: var(--shadow); max-width: 90vw; opacity: 0; transition: opacity .2s; pointer-events: none; }
@@ -675,34 +694,90 @@ async function wikiSummary(tags) {
 const state = {
   data: {
     name: "", points: [], highlights: [], route: null, pois: [], poisStatus: "idle",
-    pos: null, accuracy: null, gps: false, progress: 0, offRoute: false, snapIdx: 0, mode: "preview" // preview | gps
+    pos: null, accuracy: null, gps: false, progress: 0, offRoute: false, offDist: 0, mode: "preview", // preview | gps
+    poisAll: [], roadside: [], ways: null, reroute: null, rerouting: false, weakSignal: false
   },
   subs: new Set(),
   set(patch) { Object.assign(this.data, patch); this.subs.forEach(fn => fn(this.data, patch)); },
   on(fn) { this.subs.add(fn); return () => this.subs.delete(fn); }
 };
 
-/* Project a position onto the route, preferring positions near the last progress (loops revisit streets). */
-function snapToRoute(route, pos, lastProgress, fresh = false) {
+/* Map-match a position to the route.
+   Scores each segment by distance, plus penalties for going backwards, for jumping far ahead
+   (the loop revisits streets) and for travelling against the route's direction (the loop also
+   uses the same streets in opposite directions). `global` ignores the window around lastProgress. */
+function matchToRoute(route, pos, opts = {}) {
+  const { lastProgress = 0, heading = null, windowBack = 250, windowAhead = 2000, global = false } = opts;
   const { shape, cum } = route;
+  const cosLat = Math.cos(pos[0] * Math.PI / 180);
   let best = null;
   for (let i = 0; i < shape.length - 1; i++) {
+    if (!global && (cum[i + 1] < lastProgress - windowBack || cum[i] > lastProgress + windowAhead)) continue;
     const a = shape[i], b = shape[i + 1];
-    // planar projection in a small area
-    const cosLat = Math.cos(a[0] * Math.PI / 180);
-    const ax = 0, ay = 0, bx = (b[1] - a[1]) * cosLat * 111320, by = (b[0] - a[0]) * 110540;
+    const bx = (b[1] - a[1]) * cosLat * 111320, by = (b[0] - a[0]) * 110540;
     const px = (pos[1] - a[1]) * cosLat * 111320, py = (pos[0] - a[0]) * 110540;
-    const len2 = bx * bx + by * by || 1e-9;
+    if (Math.abs(px) > 3000 || Math.abs(py) > 3000) continue;
+    const len2 = bx * bx + by * by || 1e-9, len = Math.sqrt(len2);
     const t = Math.max(0, Math.min(1, (px * bx + py * by) / len2));
     const d = Math.hypot(px - t * bx, py - t * by);
-    const prog = cum[i] + t * Math.sqrt(len2);
-    // penalise going backwards, and jumping far ahead (a loop's second pass) when a nearby candidate exists
-    const back = Math.max(0, lastProgress - prog), ahead = Math.max(0, prog - lastProgress - 400);
-    const score = fresh ? d + prog * 0.002 : d + back * 0.15 + ahead * 0.03; // fresh: nearest wins, earlier pass breaks ties
+    if (best && d > best.score + 5) continue;
+    const prog = cum[i] + t * len;
+    let score = d;
+    if (!global) score += Math.max(0, lastProgress - prog) * 0.15 + Math.max(0, prog - lastProgress - 300) * 0.03;
+    if (heading != null && len > 3) {
+      const segB = (Math.atan2(bx, by) * 180 / Math.PI + 360) % 360;
+      const diff = Math.abs(((heading - segB) % 360 + 540) % 360 - 180);
+      score += (1 - Math.cos(diff * Math.PI / 180)) * 20; // walking against this segment costs +40 m
+    }
     if (!best || score < best.score) best = { score, dist: d, prog, idx: i, t };
   }
   return best;
 }
+/* Nearest point on the route, anywhere (map taps, projections). */
+function snapToRoute(route, pos) { return matchToRoute(route, pos, { global: true }); }
+
+/* Every pass of the route within `maxD` metres of a point — a loop can pass a sight twice. */
+function passesNear(route, pos, maxD = 60) {
+  const { shape, cum } = route, cosLat = Math.cos(pos[0] * Math.PI / 180), out = [];
+  for (let i = 0; i < shape.length - 1; i++) {
+    const a = shape[i], b = shape[i + 1];
+    const bx = (b[1] - a[1]) * cosLat * 111320, by = (b[0] - a[0]) * 110540, px = (pos[1] - a[1]) * cosLat * 111320, py = (pos[0] - a[0]) * 110540;
+    if (Math.abs(px) > maxD + 200 || Math.abs(py) > maxD + 200) continue;
+    const len2 = bx * bx + by * by || 1e-9, t = Math.max(0, Math.min(1, (px * bx + py * by) / len2));
+    const d = Math.hypot(px - t * bx, py - t * by);
+    if (d > maxD) continue;
+    const prog = cum[i] + t * Math.sqrt(len2);
+    const last = out[out.length - 1];
+    if (last && prog - last.prog < 200) { if (d < last.dist) { last.dist = d; last.prog = prog; } }
+    else out.push({ prog, dist: d });
+  }
+  return out;
+}
+
+/* Rank sights so a dense city doesn't drown the list: top N per kilometre of route. */
+const KIND_SCORE = { cathedral: 10, basilica: 10, museum: 8, palace: 8, castle: 8, church: 6, viewpoint: 6, monument: 5, memorial: 4, garden: 5, park: 4, attraction: 5, market: 4, theatre: 4, gallery: 3, fountain: 3, artwork: 2, "city gate": 5, ruins: 5, "archaeological site": 5, tower: 5, building: 3, chapel: 4, synagogue: 5 };
+function scorePOI(p) {
+  const t = p.tags || {};
+  let sc = KIND_SCORE[p.kind] ?? 2;
+  if (/cathedral|basilica/.test(t.building || "")) sc = 10;
+  if (t.wikipedia || t["wikipedia:en"]) sc += 4; else if (t.wikidata) sc += 2;
+  if (t["name:en"]) sc += 2;
+  if (t.heritage) sc += 2;
+  if (t.tourism === "attraction") sc += 1;
+  return sc;
+}
+function rankPOIs(pois, route, perKm = 5) {
+  const scored = pois.map(p => {
+    const m = snapToRoute(route, [p.lat, p.lon]);
+    return { ...p, score: scorePOI(p), prog: m ? m.prog : 0, lateral: m ? m.dist : 9999 };
+  }).filter(p => p.lateral <= 140);
+  const buckets = {};
+  for (const p of scored) (buckets[Math.floor(p.prog / 1000)] ||= []).push(p);
+  const top = new Set();
+  for (const b of Object.values(buckets)) b.sort((a, c) => c.score - a.score).slice(0, perKm).forEach(p => top.add(p.id));
+  return { all: scored.sort((a, c) => c.score - a.score), top: scored.filter(p => top.has(p.id)) };
+}
+
 function positionAt(route, progress) {
   const { shape, cum } = route;
   let lo = 0, hi = cum.length - 1;
@@ -742,6 +817,7 @@ const ICON = {
   building: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21V5l8-3 8 3v16M10 21v-5h4v5"/></svg>'
 };
 ICON.escalator = ICON.stairs;
+ICON.sight = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2.9 6.3 6.9.7-5.2 4.7 1.5 6.8L12 17l-6.1 3.5 1.5-6.8L2.2 9l6.9-.7z"/></svg>';
 const iconFor = k => ICON[k] || ICON.straight;
 
 /* =====================================================================
@@ -750,7 +826,7 @@ const iconFor = k => ICON[k] || ICON.straight;
 class WalkDirections extends HTMLElement {
   connectedCallback() {
     this.innerHTML = `
-      <div class="dir-status"><span class="dot" id="dot"></span><span id="statusText">Preview mode</span><span class="spacer"></span><span id="remaining"></span></div>
+      <div class="dir-status"><span class="dot" id="dot"></span><span id="statusText">Preview mode</span><span class="spacer"></span><span id="remaining"></span><button class="iconbtn" id="compactBtn" title="Show fewer / more instructions">▲</button></div>
       <ol class="dir-list" id="list"></ol>
       <div class="scrub" id="scrub">
         <button id="prevTurn" title="Previous turn">◀</button>
@@ -770,29 +846,38 @@ class WalkDirections extends HTMLElement {
       const target = dir > 0 ? ms.find(m => m.d0 > p + 8) : [...ms].reverse().find(m => m.d0 < p - 8);
       if (target) setPreviewProgress(Math.max(0, target.d0 - 5));
     };
+    this.setCompact(store.get("walk:compact") === true, false);
+    $("#compactBtn", this).onclick = e => { e.stopPropagation(); this.setCompact(!this.classList.contains("compact")); };
     $("#prevTurn", this).onclick = () => jumpTurn(-1);
     $("#nextTurn", this).onclick = () => jumpTurn(1);
     state.on(d => this.render(d));
   }
+  setCompact(v, save = true) { this.classList.toggle("compact", v); $("#compactBtn", this).textContent = v ? "▼" : "▲"; if (save) store.set("walk:compact", v); }
   render(d) {
     const list = $("#list", this), dot = $("#dot", this), st = $("#statusText", this), rem = $("#remaining", this);
     if (!d.route) { list.innerHTML = `<li class="dir-empty">No route yet.</li>`; return; }
-    const { current, list: up } = upcoming(d.route, d.progress, 3);
+    const detour = d.mode === "gps" && d.reroute;
+    const { current, list: up } = detour ? upcoming(d.reroute.route, d.reroute.progress, 3) : upcoming(d.route, d.progress, 3);
     const left = Math.max(0, d.route.length - d.progress);
     rem.textContent = `${fmtDist(left)} left · ~${fmtTime(left / 1.3)}`;
     $("#range", this).value = Math.round(1000 * d.progress / d.route.length);
     $("#lab", this).textContent = fmtDist(d.progress);
     if (d.mode === "gps") {
       dot.className = "dot " + (d.pos ? (d.offRoute ? "off" : "live") : "");
-      st.textContent = !d.pos ? "Waiting for GPS…" : d.offRoute ? `${fmtDist(d.offDist)} from the path — head back to the blue line` : (current?.street ? `On ${current.street}` : current?.towards ? `Heading to ${current.towards}` : "On route");
+      st.textContent = !d.pos ? "Waiting for GPS…" : d.weakSignal ? `Weak GPS signal (±${Math.round(d.accuracy)} m) — holding position` :
+        detour ? `Detour back to the route · ${fmtDist(Math.max(0, d.reroute.route.length - d.reroute.progress))} to go` :
+        d.offRoute ? `${fmtDist(d.offDist)} from the path${d.rerouting ? " — finding a way back…" : " — head back to the blue line"}` :
+        (current?.street ? `On ${current.street}` : current?.towards ? `Heading to ${current.towards}` : "On route");
     } else {
       dot.className = "dot";
       st.textContent = current?.street ? `Preview · on ${current.street}` : current?.towards ? `Preview · heading to ${current.towards}` : "Preview — drag the slider or tap the map to move";
     }
     if (!up.length) {
-      list.innerHTML = `<li class="dir-item primary"><div class="icon">${ICON.arrive}</div><div class="text"><div class="main">${esc(current?.text || "You have arrived")}</div><div class="sub">End of the walk</div></div><div class="dist"></div></li>`;
+      list.innerHTML = `<li class="dir-item primary"><div class="icon">${ICON.arrive}</div><div class="text"><div class="main">${esc(detour ? "Rejoin the route" : current?.text || "You have arrived")}</div><div class="sub">${detour ? "Back on the blue line" : "End of the walk"}</div></div><div class="dist"></div></li>`;
       return;
     }
+    // the next sight on the route, shown as a card in its place among the turns
+    const sight = !detour && d.roadside ? d.roadside.find(x => x.prog > d.progress + 5 && x.prog < d.progress + 400) : null;
     const mainHtml = m => {
       if (m.street) { const t = esc(m.text), st = esc(m.street); return t.includes(st) ? t.replace(st, `<b class="road">${st}</b>`) : `${t} <b class="road">${st}</b>`; }
       return esc(m.text) + (m.towards ? ` <span class="towards">→ <b class="road">${esc(m.towards)}</b></span>` : "");
@@ -803,19 +888,31 @@ class WalkDirections extends HTMLElement {
       if (m.towards) return `unnamed path — reach ${esc(m.towards)} in ${fmtDist(m.towardsIn)}`;
       return m.len > 0 ? `then ${fmtDist(m.len)}` : "";
     };
-    list.innerHTML = up.map((u, i) => `
+    const rows = up.map((u, i) => ({ type: "turn", in: u.in, html: `
       <li class="dir-item ${i === 0 ? "primary" : ""}" data-d="${u.m.d0}">
         <div class="icon">${iconFor(u.m.kind)}</div>
         <div class="text"><div class="main">${mainHtml(u.m)}</div>${i === 0 && subHtml(u.m, true) ? `<div class="sub">${subHtml(u.m, true)}</div>` : ""}</div>
         <div class="dist">${i === 0 ? (u.in < 15 ? "Now" : fmtDist(u.in)) : fmtDist(u.in)}</div>
-      </li>`).join("");
-    list.querySelectorAll(".dir-item").forEach(li => li.onclick = () => { const p = positionAt(d.route, +li.dataset.d); document.getElementById("map").flyTo(p.pos); });
+      </li>` }));
+    if (sight) rows.push({ type: "sight", in: sight.prog - d.progress, html: `
+      <li class="dir-item sight" data-d="${sight.prog}" data-sight="${esc(sight.id)}">
+        <div class="icon">${ICON.sight}</div>
+        <div class="text"><div class="main">${esc(sight.name)}</div><div class="sub">${esc(sight.desc || sight.kind || "")}</div></div>
+        <div class="dist">${fmtDist(Math.max(0, sight.prog - d.progress))}</div>
+      </li>` });
+    rows.sort((a, b) => a.in - b.in);
+    list.innerHTML = rows.slice(0, 4).map(r => r.html).join("");
+    list.querySelectorAll(".dir-item").forEach(li => li.onclick = () => {
+      if (li.dataset.sight) { document.getElementById("nearby").open(li.dataset.sight); return; }
+      const p = positionAt(d.route, +li.dataset.d); document.getElementById("map").flyTo(p.pos);
+    });
   }
 }
 customElements.define("walk-directions", WalkDirections);
 
 function setPreviewProgress(p) {
   const r = state.data.route; if (!r) return;
+  p = Math.max(0, Math.min(r.length, p));
   if (state.data.mode === "gps") { state.set({ progress: p }); return; } // GPS keeps the real position; it continues from here
   const { pos } = positionAt(r, p);
   state.set({ progress: p, pos, offRoute: false, offDist: 0 });
@@ -830,39 +927,62 @@ class WalkMap extends HTMLElement {
       <div class="map-note hidden" id="note"></div>
       <div class="map-fabs">
         <button class="fab on" id="follow" title="Keep the map centred on me"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M21 3L10 14M21 3l-7 18-4-7-7-4z"/></svg></button>
+        <button class="fab" id="full" title="Full-screen map"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></button>
         <button class="fab" id="fit" title="Show the whole route"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/></svg></button>
       </div>`;
     this.follow = true;
-    const map = this.map = L.map($("#leaflet", this), { zoomControl: false, attributionControl: true }).setView([48.868, 2.341], 13);
+    const map = this.map = L.map($("#leaflet", this), { zoomControl: false, attributionControl: true, preferCanvas: true, tap: false, zoomSnap: 0.5, wheelPxPerZoomLevel: 90 }).setView([48.868, 2.341], 13);
     L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors' }).addTo(map);
     L.control.zoom({ position: "bottomleft" }).addTo(map);
-    this.routeDone = L.polyline([], { color: "#9ca3af", weight: 6, opacity: .85, lineCap: "round" }).addTo(map);
-    this.routeAhead = L.polyline([], { color: "#ffffff", weight: 10, opacity: .9, lineCap: "round" }).addTo(map);
-    this.routeAhead2 = L.polyline([], { color: "#2563eb", weight: 6, opacity: .95, lineCap: "round" }).addTo(map);
+    // the full route is drawn once; only the short "walked" overlay changes as you go
+    this.routeAhead = L.polyline([], { color: "#ffffff", weight: 10, opacity: .9, lineCap: "round", smoothFactor: 1.5 }).addTo(map);
+    this.routeAhead2 = L.polyline([], { color: "#2563eb", weight: 6, opacity: .95, lineCap: "round", smoothFactor: 1.5 }).addTo(map);
+    this.routeDone = L.polyline([], { color: "#9ca3af", weight: 6, opacity: .9, lineCap: "round", smoothFactor: 1.5 }).addTo(map);
+    this.detour = L.polyline([], { color: "#ea580c", weight: 5, opacity: .95, dashArray: "8 8", lineCap: "round" }).addTo(map);
     this.wpLayer = L.layerGroup().addTo(map);
     this.poiLayer = L.layerGroup().addTo(map);
     this.you = L.marker([0, 0], { icon: L.divIcon({ className: "", html: '<div class="you-marker"></div>', iconSize: [18, 18], iconAnchor: [9, 9] }), zIndexOffset: 1000 });
     this.acc = L.circle([0, 0], { radius: 0, color: "#2563eb", weight: 1, fillOpacity: .08 });
     map.on("dragstart", () => this.setFollow(false));
+    map.on("zoomstart", () => { this.userZooming = true; });
+    map.on("zoomend", () => { this.userZooming = false; });
     map.on("click", e => {
       const d = state.data; if (!d.route) return;
-      const s = snapToRoute(d.route, [e.latlng.lat, e.latlng.lng], 0, true); if (!s || s.dist > 120) return;
+      const s = snapToRoute(d.route, [e.latlng.lat, e.latlng.lng]); if (!s || s.dist > 120) return;
       if (d.mode === "preview") setPreviewProgress(s.prog);
-      else { state.set({ progress: s.prog }); toast("Progress set here — GPS will continue from this point."); }
+      else { tracker.anchor(s.prog); state.set({ progress: s.prog, reroute: null, offRoute: false }); toast("Progress set here — GPS will continue from this point."); }
     });
     $("#follow", this).onclick = () => { this.setFollow(true); this.center(true); };
     $("#fit", this).onclick = () => { this.setFollow(false); this.fit(); };
-    this.lastRoute = null; this.lastPois = null; this.lastDoneIdx = -1;
+    $("#full", this).onclick = () => {
+      const on = !document.body.classList.contains("map-full");
+      document.body.classList.toggle("map-full", on);
+      $("#full", this).classList.toggle("on", on);
+      const dir = document.getElementById("directions");
+      if (on) { this._wasCompact = dir.classList.contains("compact"); dir.setCompact(true, false); }
+      else dir.setCompact(this._wasCompact ?? false, false);
+      setTimeout(() => { map.invalidateSize(); if (state.data.pos) this.center(false); }, 50);
+    };
+    this.lastRoute = null; this.lastPois = null; this.lastDoneIdx = -1; this.lastDoneAt = 0; this.lastDetour = null; this.zoomedIn = false;
     state.on((d, patch) => this.render(d, patch));
     new ResizeObserver(() => map.invalidateSize()).observe(this);
   }
   setFollow(v) { this.follow = v; $("#follow", this).classList.toggle("on", v); }
   fit() { const r = state.data.route; if (r) this.map.fitBounds(L.latLngBounds(r.shape), { padding: [30, 30] }); }
   flyTo(pos) { this.setFollow(false); this.map.flyTo(pos, Math.max(this.map.getZoom(), 17), { duration: .6 }); }
-  center(force) { const d = state.data; if (!d.pos) return; if (force || this.follow) this.map.setView(d.pos, Math.max(this.map.getZoom(), 17), { animate: true }); }
+  center(force) {
+    const d = state.data; if (!d.pos) return;
+    if (force) { this.map.setView(d.pos, Math.max(this.map.getZoom(), 17), { animate: true }); this.zoomedIn = true; return; }
+    if (!this.follow || this.userZooming) return;
+    if (!this.zoomedIn) { this.map.setView(d.pos, 17, { animate: false }); this.zoomedIn = true; return; }
+    // pan only when the marker drifts out of the middle of the screen; never touch the zoom level
+    const size = this.map.getSize(), pt = this.map.latLngToContainerPoint(d.pos);
+    const mx = size.x * 0.22, my = size.y * 0.22;
+    if (pt.x < mx || pt.x > size.x - mx || pt.y < my || pt.y > size.y - my) this.map.panTo(d.pos, { animate: true, duration: 0.5 });
+  }
   render(d, patch) {
     if (d.route !== this.lastRoute) {
-      this.lastRoute = d.route; this.wpLayer.clearLayers();
+      this.lastRoute = d.route; this.wpLayer.clearLayers(); this.lastDoneIdx = -1; this.zoomedIn = false;
       if (d.route) {
         this.routeAhead.setLatLngs(d.route.shape); this.routeAhead2.setLatLngs(d.route.shape); this.routeDone.setLatLngs([]);
         d.highlights.forEach((h, i) => L.marker([h.lat, h.lon], { icon: L.divIcon({ className: "", html: `<div class="wp-marker">${i + 1}</div>`, iconSize: [22, 22], iconAnchor: [11, 11] }) })
@@ -879,15 +999,18 @@ class WalkMap extends HTMLElement {
       if (!this.map.hasLayer(this.you)) { this.you.addTo(this.map); this.acc.addTo(this.map); }
       this.you.setLatLng(d.pos);
       this.acc.setLatLng(d.pos).setRadius(d.mode === "gps" && d.accuracy ? d.accuracy : 0);
-      // split route into done / ahead at the current progress
+      // grey out the walked part — throttled, and only the overlay changes
       const { idx, pos } = positionAt(d.route, d.progress);
-      if (idx !== this.lastDoneIdx || "progress" in patch) {
-        this.lastDoneIdx = idx;
-        const done = d.route.shape.slice(0, idx + 1).concat([pos]);
-        const ahead = [pos].concat(d.route.shape.slice(idx + 1));
-        this.routeDone.setLatLngs(done); this.routeAhead.setLatLngs(ahead); this.routeAhead2.setLatLngs(ahead);
+      const now = Date.now();
+      if (idx !== this.lastDoneIdx && (d.mode !== "gps" || now - this.lastDoneAt > 3000)) {
+        this.lastDoneIdx = idx; this.lastDoneAt = now;
+        this.routeDone.setLatLngs(d.route.shape.slice(0, idx + 1).concat([pos]));
       }
       if ("pos" in patch) this.center(false);
+    }
+    if (d.reroute !== this.lastDetour) {
+      this.lastDetour = d.reroute;
+      this.detour.setLatLngs(d.reroute ? d.reroute.route.shape : []);
     }
     const note = $("#note", this);
     if (d.mode === "preview" && d.route) { note.textContent = "Preview: tap the route to jump there. Turn on GPS when you set off."; note.classList.remove("hidden"); }
@@ -932,7 +1055,8 @@ class WalkNearby extends HTMLElement {
     const hi = d.highlights.map((h, i) => ({ id: "hl/" + i, name: h.name, lat: h.lat, lon: h.lon, kind: "highlight", desc: h.desc, facts: FACTS[h.name] || [], highlight: true, order: i }));
     // route notes attached to named route points
     const notes = d.points.filter(p => ROUTE_NOTES[p.name]).map((p, i) => ({ id: "note/" + i, name: p.name.replace(/ (mid|south|north|return|southbound)$/, ""), lat: p.lat, lon: p.lon, kind: "on the way", facts: [ROUTE_NOTES[p.name]], highlight: false }));
-    const all = hi.concat(notes, d.pois.map(p => ({ ...p, highlight: false })));
+    const src = this.tab === "all" && this.showAll ? (d.poisAll || d.pois) : d.pois;
+    const all = hi.concat(notes, src.map(p => ({ ...p, highlight: false })));
     all.forEach(x => { x.dist = pos ? haversine(pos, [x.lat, x.lon]) : null; });
     return all;
   }
@@ -942,7 +1066,8 @@ class WalkNearby extends HTMLElement {
     let list = this.items(d);
     if (this.tab === "nearby") { list = list.filter(x => x.dist != null && x.dist <= 220).sort((a, b) => a.dist - b.dist).slice(0, 25); }
     else if (this.tab === "highlights") { list = list.filter(x => x.highlight || x.kind === "on the way").sort((a, b) => (a.order ?? 99) - (b.order ?? 99)); }
-    else { list = list.sort((a, b) => (a.highlight ? -1 : 1) - (b.highlight ? -1 : 1) || a.name.localeCompare(b.name)); }
+    else { list = list.sort((a, b) => (a.highlight ? -1 : 1) - (b.highlight ? -1 : 1) || (b.score || 0) - (a.score || 0) || a.name.localeCompare(b.name)); }
+    const hidden = this.tab === "all" && !this.showAll && d.poisAll ? d.poisAll.length - d.pois.length : 0;
     count.textContent = this.tab === "nearby" ? `${list.length} within 220 m` : `${list.length}`;
     $("#sheetTitle", this).textContent = this.tab === "nearby" ? "Nearby" : this.tab === "highlights" ? "Highlights & facts" : "All sights on this walk";
     if (!list.length) {
@@ -963,7 +1088,8 @@ class WalkNearby extends HTMLElement {
         <div class="poi-body">${x.desc ? `<p class="meta">${esc(x.desc)}</p>` : ""}${facts}${wikiHtml}${meta ? `<p class="meta">${meta}</p>` : ""}
           <div class="actions"><button data-act="map">Show on map</button>${hasWiki && w === undefined ? `<button data-act="wiki">Read more (Wikipedia)</button>` : ""}</div>
         </div></div>`;
-    }).join("");
+    }).join("") + (hidden > 0 ? `<button class="show-more" id="showMore">Show ${hidden} more minor sights</button>` : this.showAll && this.tab === "all" ? `<button class="show-more" id="showMore">Show only the top sights</button>` : "");
+    const sm = $("#showMore", this); if (sm) sm.onclick = () => { this.showAll = !this.showAll; this.render(state.data); };
     body.querySelectorAll(".poi").forEach(el => {
       const id = el.dataset.id;
       $(".poi-head", el).onclick = () => { if (this.openIds.has(id)) this.openIds.delete(id); else { this.openIds.add(id); } el.classList.toggle("open"); };
@@ -1007,13 +1133,15 @@ async function loadWalk(gpxText, { force = false } = {}) {
   }
   overlay.classList.add("hidden");
   const enriched = route.enriched;
+  if (enriched) fetchNamedStreets(route.shape).then(ways => state.set({ ways })).catch(() => { });
   route = finishRoute(route.shape, route.maneuvers, route.time, route.provider);
   $("#stat").textContent = `${fmtDist(route.length)} · ~${fmtTime(route.length / 1.3)}`;
-  state.set({ route });
+  state.set({ route, roadside: buildRoadside(route, parsed.highlights, []) });
   setPreviewProgress(0);
   if (!enriched) {
     try {
       const ways = await fetchNamedStreets(route.shape);
+      state.set({ ways });
       const r2 = enrichRoute(route, ways);
       store.set(key, { shape: r2.shape, maneuvers: r2.maneuvers.map(({ i0, i1, text, street, kind, len }) => ({ i0, i1, text, street, kind, len })), time: r2.time, provider: r2.provider, enriched: true });
       if (state.data.route === route) { state.set({ route: r2 }); setPreviewProgress(state.data.progress); }
@@ -1022,13 +1150,91 @@ async function loadWalk(gpxText, { force = false } = {}) {
   }
   loadPOIs(route, key);
 }
+/* Sights that sit on the route itself, with the progress at which you pass them (each pass of a loop). */
+function buildRoadside(route, highlights, topPois) {
+  const out = [];
+  highlights.forEach((h, i) => passesNear(route, [h.lat, h.lon], 70).forEach(p => out.push({ id: "hl/" + i, name: h.name, desc: h.desc, kind: "highlight", prog: p.prog })));
+  topPois.filter(p => p.score >= 8 && p.lateral <= 60).forEach(p => passesNear(route, [p.lat, p.lon], 60).forEach(q => out.push({ id: p.id, name: p.name, desc: p.kind, kind: p.kind, prog: q.prog })));
+  out.sort((a, b) => a.prog - b.prog);
+  // don't announce the same thing twice within 150 m
+  return out.filter((x, i) => !out.slice(0, i).some(y => y.name === x.name && Math.abs(y.prog - x.prog) < 150));
+}
 async function loadPOIs(route, key) {
   const pk = key + ":pois";
   const cached = store.get(pk);
-  if (cached && Date.now() - cached.t < 7 * 864e5) { state.set({ pois: cached.pois, poisStatus: "ok" }); return; }
-  state.set({ poisStatus: "loading" });
-  try { const pois = await fetchPOIs(route.shape); store.set(pk, { t: Date.now(), pois }); state.set({ pois, poisStatus: "ok" }); }
-  catch (e) { console.warn(e); state.set({ poisStatus: "error" }); }
+  let pois;
+  if (cached && Date.now() - cached.t < 7 * 864e5) pois = cached.pois;
+  else {
+    state.set({ poisStatus: "loading" });
+    try { pois = await fetchPOIs(route.shape); store.set(pk, { t: Date.now(), pois }); }
+    catch (e) { console.warn(e); state.set({ poisStatus: "error" }); }
+  }
+  const ranked = pois ? rankPOIs(pois, route, 5) : { all: [], top: [] };
+  state.set({ pois: ranked.top, poisAll: ranked.all, poisStatus: pois ? "ok" : state.data.poisStatus, roadside: buildRoadside(route, state.data.highlights, ranked.top) });
+}
+
+/* ---------- live tracking ---------- */
+const tracker = {
+  fixes: [], heading: null, lost: true, onCount: 0, offCount: 0, jumpCount: 0, lastRerouteAt: 0, lastRerouteFrom: null, detourOff: 0,
+  reset() { this.fixes = []; this.heading = null; this.lost = true; this.onCount = 0; this.offCount = 0; this.jumpCount = 0; this.detourOff = 0; },
+  anchor(prog) { this.lost = false; this.onCount = 2; this.offCount = 0; this.jumpCount = 0; },
+  push(p) {
+    const fix = { pos: [p.coords.latitude, p.coords.longitude], acc: p.coords.accuracy || 50, speed: p.coords.speed, head: p.coords.heading };
+    this.fixes.push(fix); if (this.fixes.length > 8) this.fixes.shift();
+    if (fix.head != null && !isNaN(fix.head) && fix.speed > 0.6) this.heading = fix.head;
+    else for (let i = this.fixes.length - 2; i >= 0; i--) { const q = this.fixes[i]; if (haversine(q.pos, fix.pos) >= 8) { this.heading = bearing(q.pos, fix.pos); break; } }
+    return fix;
+  }
+};
+function onFix(fix) {
+  const d = state.data, r = d.route, pos = fix.pos;
+  const onThreshold = Math.max(35, fix.acc * 0.7);
+  const patch = { mode: "gps", pos, accuracy: fix.acc, gps: true, weakSignal: false };
+  // 1. match against the main route (windowed around where we were; whole route when lost)
+  let m = matchToRoute(r, pos, { lastProgress: d.progress, heading: tracker.heading, global: tracker.lost });
+  const onRoute = m.dist <= onThreshold;
+  if (onRoute) {
+    tracker.onCount++; tracker.offCount = 0; tracker.jumpCount = 0;
+    if (tracker.lost || tracker.onCount >= 2) { tracker.lost = false; patch.progress = m.prog; patch.offRoute = false; }
+    patch.offDist = m.dist;
+  } else {
+    tracker.onCount = 0; tracker.offCount++;
+    patch.offDist = m.dist;
+    // maybe we are on the route, just not where the window expected (wrong pass of the loop, or a big skip)
+    const g = matchToRoute(r, pos, { global: true, heading: tracker.heading });
+    if (g.dist <= onThreshold && Math.abs(g.prog - d.progress) > 250) {
+      tracker.jumpCount++;
+      if (tracker.jumpCount >= 3) { tracker.jumpCount = 0; tracker.offCount = 0; tracker.lost = false; patch.progress = g.prog; patch.offRoute = false; patch.offDist = g.dist; patch.reroute = null; toast("Re-synced to the route"); }
+    } else tracker.jumpCount = 0;
+    if (tracker.offCount >= 3 && patch.progress == null) {
+      patch.offRoute = true;
+      if (m.dist < 150 && m.prog >= d.progress - 30) patch.progress = m.prog; // small wander: keep counting progress along the line
+    }
+  }
+  // 2. detour handling
+  if (d.reroute) {
+    const rm = matchToRoute(d.reroute.route, pos, { lastProgress: d.reroute.progress, heading: tracker.heading });
+    if (rm.dist <= 40) { tracker.detourOff = 0; patch.reroute = { ...d.reroute, progress: rm.prog }; }
+    else if (++tracker.detourOff >= 4) { patch.reroute = null; tracker.detourOff = 0; }
+    if (onRoute && tracker.onCount >= 2) { patch.reroute = null; patch.offRoute = false; }
+  }
+  const nowOff = patch.offRoute ?? d.offRoute;
+  if (nowOff && !d.reroute && m.dist > 60 && !d.rerouting) {
+    const since = Date.now() - tracker.lastRerouteAt, moved = tracker.lastRerouteFrom ? haversine(tracker.lastRerouteFrom, pos) : 1e9;
+    if (since > 30000 && moved > 40) requestReroute(pos, positionAt(r, Math.max(d.progress, m.prog) + 15).pos);
+  }
+  state.set(patch);
+}
+async function requestReroute(from, to) {
+  tracker.lastRerouteAt = Date.now(); tracker.lastRerouteFrom = from;
+  state.set({ rerouting: true });
+  try {
+    let leg = await routeOSRM([{ lat: from[0], lon: from[1] }, { lat: to[0], lon: to[1] }]);
+    if (state.data.ways) leg = enrichRoute(leg, state.data.ways);
+    if (leg.maneuvers.length) { const last = leg.maneuvers[leg.maneuvers.length - 1]; if (last.kind === "arrive") last.text = "Rejoin the route"; }
+    if (state.data.mode === "gps" && state.data.offRoute) { state.set({ reroute: { route: leg, progress: 0, from, to }, rerouting: false }); toast(`Detour: ${fmtDist(leg.length)} back to the route`); }
+    else state.set({ rerouting: false });
+  } catch (e) { console.warn("reroute failed", e); state.set({ rerouting: false }); }
 }
 function startGPS() {
   if (!navigator.geolocation) { toast("Geolocation isn't available in this browser."); return; }
@@ -1037,15 +1243,15 @@ function startGPS() {
     return;
   }
   const btn = $("#gpsBtn"); btn.classList.add("busy");
-  let fresh = true;
+  tracker.reset();
   watchId = navigator.geolocation.watchPosition(p => {
     btn.classList.remove("busy"); btn.classList.add("on");
-    const pos = [p.coords.latitude, p.coords.longitude], r = state.data.route; if (!r) return;
-    const s = snapToRoute(r, pos, state.data.progress, fresh);
-    const off = s.dist > Math.max(45, (p.coords.accuracy || 0) * 0.8);
-    const follow = fresh || s.dist < 150; // only freeze progress when far from the whole route
-    fresh = false;
-    state.set({ mode: "gps", pos, accuracy: p.coords.accuracy, progress: follow ? s.prog : state.data.progress, offRoute: off, offDist: s.dist, gps: true });
+    const r = state.data.route; if (!r) return;
+    if ((p.coords.accuracy || 0) > 80) { // too vague to match against streets 10 m apart
+      state.set({ mode: "gps", gps: true, pos: [p.coords.latitude, p.coords.longitude], accuracy: p.coords.accuracy, weakSignal: true });
+      return;
+    }
+    onFix(tracker.push(p));
   }, err => {
     btn.classList.remove("busy");
     if (err.code === 1) alert("Location permission was denied.\n\nCheck the site's location permission in the browser (the padlock/aA icon in the address bar) and that Location Services are on for the browser in the phone's settings, then tap GPS again.\n\nPreview mode keeps working in the meantime.");
@@ -1061,7 +1267,7 @@ function stopGPS() {
   $("#gpsBtn").classList.remove("on", "busy");
   window._wl?.release?.();
   const r = state.data.route;
-  state.set({ mode: "preview", gps: false, offRoute: false, ...(r ? { pos: positionAt(r, state.data.progress).pos } : {}) });
+  state.set({ mode: "preview", gps: false, offRoute: false, reroute: null, rerouting: false, weakSignal: false, ...(r ? { pos: positionAt(r, state.data.progress).pos } : {}) });
 }
 $("#gpsBtn").onclick = () => state.data.gps ? stopGPS() : startGPS();
 $("#menuBtn").onclick = e => { e.stopPropagation(); $("#menuList").classList.toggle("open"); };
