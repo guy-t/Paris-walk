@@ -291,21 +291,39 @@ function cumulative(line) { const cum = [0]; for (let i = 1; i < line.length; i+
 /* =====================================================================
    Overpass: waterway graph → navigable route (shortest path, weighted)
    ===================================================================== */
-const OVERPASS = "https://overpass-api.de/api/interpreter";
-async function overpass(q) {
-  const res = await fetch(OVERPASS, { method: "POST", body: "data=" + encodeURIComponent(q), headers: { "Content-Type": "application/x-www-form-urlencoded" } });
-  if (!res.ok) throw new Error(`OpenStreetMap (Overpass) answered ${res.status}`);
-  return (await res.json()).elements || [];
+/* Several public Overpass servers; rotate and retry when one is busy (429/503/504). */
+const OVERPASS_SERVERS = ["https://overpass-api.de/api/interpreter", "https://overpass.private.coffee/api/interpreter", "https://overpass.kumi.systems/api/interpreter", "https://maps.mail.ru/osm/tools/overpass/api/interpreter"];
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+async function overpass(q, onStatus = () => { }) {
+  let lastErr = null;
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const url = OVERPASS_SERVERS[attempt % OVERPASS_SERVERS.length];
+    try {
+      const res = await fetch(url, { method: "POST", body: "data=" + encodeURIComponent(q), headers: { "Content-Type": "application/x-www-form-urlencoded" } });
+      if (res.ok) { const j = await res.json(); if (j.remark && /timed out|runtime error/i.test(j.remark)) throw new Error(j.remark); return j.elements || []; }
+      lastErr = new Error(`OpenStreetMap (Overpass) answered ${res.status}`);
+      if (![429, 503, 504, 502].includes(res.status)) throw lastErr;
+    } catch (e) { lastErr = e; }
+    const wait = 4000 + attempt * 4000;
+    onStatus(`OpenStreetMap server busy (${lastErr.message}). Trying another server in ${Math.round(wait / 1000)} s… (attempt ${attempt + 2} of 8)`);
+    await sleep(wait);
+  }
+  throw lastErr;
 }
-async function fetchWaterways(bbox) {
+async function fetchWaterways(bbox, onStatus) {
   const b = bbox.join(",");
-  return overpass(`[out:json][timeout:180];(
-    way["waterway"~"^(river|canal)$"](${b});
+  // only what the router needs: the Yonne, all canals (few), lock cuts and anything tagged navigable — not every tributary
+  return overpass(`[out:json][timeout:120];(
+    way["waterway"="river"]["name"~"Yonne",i](${b});
+    way["waterway"="river"]["boat"](${b});
+    way["waterway"="river"]["CEMT"](${b});
+    way["waterway"="river"]["motorboat"](${b});
+    way["waterway"="canal"](${b});
     way["lock"="yes"](${b});
     way["waterway"="weir"](${b});
     node["waterway"~"^(lock_gate|weir)$"](${b});
     node["lock"="yes"](${b});
-  );out geom;`);
+  );out geom;`, onStatus);
 }
 /* Build the graph and find the navigable line from → to. */
 function deriveRoute(elements, from, to) {
@@ -370,10 +388,12 @@ function deriveRoute(elements, from, to) {
 /* =====================================================================
    Features along the route
    ===================================================================== */
-async function fetchFeatures(line) {
-  const simp = simplify(line, 40).map(p => `${p[0].toFixed(5)},${p[1].toFixed(5)}`).join(",");
-  const near = r => `(around:${r},${simp})`;
-  return overpass(`[out:json][timeout:180];(
+async function fetchFeatures(line, onStatus) {
+  // a coarse line keeps the query small; radii are inflated by the simplification error and results are filtered precisely afterwards
+  const TOL = 250;
+  const simp = simplify(line, TOL).map(p => `${p[0].toFixed(4)},${p[1].toFixed(4)}`).join(",");
+  const near = r => `(around:${r + TOL},${simp})`;
+  return overpass(`[out:json][timeout:120];(
     way["bridge"]["bridge"!="no"]${near(30)};
     way["bridge:structure"]${near(30)};
     way["tunnel"="yes"]["waterway"]${near(15)};
@@ -393,7 +413,7 @@ async function fetchFeatures(line) {
     nwr["historic"~"^(castle|monument|church|abbey|ruins|archaeological_site|bridge|city_gate|tower)$"]["name"]${near(1500)};
     nwr["amenity"="place_of_worship"]["name"]["wikipedia"]${near(1200)};
     nwr["natural"="cliff"]["name"]${near(1000)};
-  );out center tags;`);
+  );out center tags;`, onStatus);
 }
 function classify(t) {
   if (t["seamark:type"] && !/^(harbour|mooring|berth|small_craft_facility|bridge)$/.test(t["seamark:type"])) return "mark";
@@ -482,8 +502,8 @@ function buildFeatures(elements, wayElements, line, cum) {
     else if (cls === "mark") { if (p.dist > 80) continue; const m = markDescribe(t); hazards.push({ id: key, prog: p.prog, lat, lon, name: m.name, detail: m.detail, kind: m.kind, lateral: p.dist, tags: t }); }
     else if (cls === "hazard") { if (p.dist > 120) continue; const h = hazardDescribe(t); hazards.push({ id: key, prog: p.prog, lat, lon, name: h.name, detail: h.detail, kind: h.kind, lateral: p.dist, tags: t }); }
     else if (cls === "mooring") { if (p.dist > 250) continue; moorings.push({ id: key, prog: p.prog, lat, lon, name: t.name || (t.leisure === "marina" ? "Marina" : t.mooring === "private" ? "Private mooring" : "Mooring"), facilities: moorFacilities(t), lateral: p.dist, tags: t, source: "osm" }); }
-    else if (cls === "service") { pois.push({ id: key, prog: p.prog, lat, lon, name: t.name || (t.waterway || t.amenity || "").replace(/_/g, " "), kind: "service", lateral: p.dist, tags: t }); }
-    else if (cls !== "other") { if (!t.name) continue; pois.push({ id: key, prog: p.prog, lat, lon, name: t["name:en"] || t.name, kind: cls === "sight" ? (t.historic || t.tourism || t.natural || "sight").replace(/_/g, " ") : cls === "shop" ? t.shop.replace(/_/g, " ") : t.amenity.replace(/_/g, " "), group: cls, lateral: p.dist, tags: t }); }
+    else if (cls === "service") { if (p.dist > 400) continue; pois.push({ id: key, prog: p.prog, lat, lon, name: t.name || (t.waterway || t.amenity || "").replace(/_/g, " "), kind: "service", lateral: p.dist, tags: t }); }
+    else if (cls !== "other") { if (!t.name || p.dist > 1600) continue; pois.push({ id: key, prog: p.prog, lat, lon, name: t["name:en"] || t.name, kind: cls === "sight" ? (t.historic || t.tourism || t.natural || "sight").replace(/_/g, " ") : cls === "shop" ? t.shop.replace(/_/g, " ") : t.amenity.replace(/_/g, " "), group: cls, lateral: p.dist, tags: t }); }
   }
   bridges.sort((a, b) => a.prog - b.prog);
   // curated haltes & sights, snapped
@@ -794,13 +814,13 @@ async function loadCanal({ force = false } = {}) {
     overlay.classList.remove("hidden");
     try {
       ot.textContent = "Loading the waterway network from OpenStreetMap (this can take a minute)…";
-      const wayEls = await fetchWaterways(ROUTE.bbox);
+      const wayEls = await fetchWaterways(ROUTE.bbox, m => ot.textContent = m);
       ot.textContent = "Finding the navigable line…";
       const { line, usedWays } = deriveRoute(wayEls, ROUTE.from, ROUTE.to);
       const slim = simplify(line, 4);
       const cum = cumulative(slim);
       ot.textContent = "Loading locks, bridges, moorings and places along the way…";
-      const featEls = await fetchFeatures(slim);
+      const featEls = await fetchFeatures(slim, m => ot.textContent = m);
       const feats = buildFeatures(featEls, wayEls, slim, cum);
       const limits = {};
       for (const t of usedWays) for (const k of ["maxheight", "maxwidth", "maxlength", "draft", "maxdraft", "CEMT", "maxspeed"]) if (t[k] && !limits[k]) limits[k] = t[k];
@@ -808,7 +828,7 @@ async function loadCanal({ force = false } = {}) {
       if (!store.set(CACHE_KEY, data)) toast("Too much data to cache in this browser — it will reload next time.");
     } catch (e) {
       console.error(e);
-      ot.innerHTML = `<b>Couldn't load the waterway.</b><br>${esc(e.message)}<br><small>Needs a data connection the first time; afterwards it's cached.</small><br><button onclick="loadCanal({force:true})">Retry</button>`;
+      ot.innerHTML = `<b>Couldn't load the waterway.</b><br>${esc(e.message)}<br><small>The OpenStreetMap servers are shared and sometimes busy — wait a minute and retry. It's cached once it works.</small><br><button onclick="loadCanal({force:true})">Retry</button>`;
       return;
     }
   }
