@@ -8,6 +8,56 @@
   <meta name="description" content="A hiking companion for the Picos de Europa: follow the line, climb left, ETA, and offline maps.">
   <title>Picos Hikes</title>
   <link rel="preconnect" href="https://a.tile.opentopomap.org" crossorigin>
+  <script>
+    /*
+     * Self-heal a broken cached shell.
+     *
+     * This app is cache-first so that it works with no signal, which means a
+     * bad pairing of files can stick. If the cached HTML and the hashed
+     * assets it names ever drift apart — a half-updated cache, an interrupted
+     * update, a deploy caught mid-flight — the page loads, references files
+     * that are not there, and renders nothing. The service worker then keeps
+     * serving that same pair on every visit, so it stays blank forever. On a
+     * phone halfway up a mountain there is no way back from that.
+     *
+     * So: if nothing has mounted several seconds after load, throw away the
+     * shell caches and the worker and reload once. Downloaded map tiles are
+     * deliberately kept — they are expensive to fetch, never go stale, and
+     * are not what broke. sessionStorage guards against a reload loop: one
+     * attempt per tab, and if that does not help the page is left alone.
+     */
+    (function () {
+      var KEY = "slownav:self-heal";
+      window.__slownavMounted = false;
+      setTimeout(function () {
+        if (window.__slownavMounted) {
+          try { sessionStorage.removeItem(KEY); } catch (e) { /* private mode */ }
+          return;
+        }
+        var alreadyTried;
+        try { alreadyTried = sessionStorage.getItem(KEY); }
+        catch (e) { alreadyTried = "1"; } // can't guard against a loop, so don't risk one
+        if (alreadyTried) return;
+        try { sessionStorage.setItem(KEY, "1"); } catch (e) { /* ignore */ }
+
+        var jobs = [];
+        if (window.caches) {
+          jobs.push(caches.keys().then(function (keys) {
+            return Promise.all(keys
+              .filter(function (k) { return k.indexOf("tiles") === -1; })
+              .map(function (k) { return caches.delete(k); }));
+          }));
+        }
+        if (navigator.serviceWorker) {
+          jobs.push(navigator.serviceWorker.getRegistrations().then(function (regs) {
+            return Promise.all(regs.map(function (r) { return r.unregister(); }));
+          }));
+        }
+        var reload = function () { location.reload(); };
+        Promise.all(jobs).then(reload, reload);
+      }, 10000);
+    })();
+  </script>
 </head>
 
 <body>
