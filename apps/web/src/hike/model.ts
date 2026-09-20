@@ -111,8 +111,17 @@ export const library = {
   get(id: string): Hike | undefined {
     return this.list().find((h) => h.id === id);
   },
+  /**
+   * Add a hike, replacing one with the same id.
+   *
+   * `idFor` derives the id from the file, so importing the same route twice
+   * is meant to be idempotent — but this used to push regardless, leaving
+   * two rows with one id and a delete that removed both. Opening a route
+   * straight from an email makes re-importing the same file the ordinary
+   * case rather than a slip, so it has to hold.
+   */
   add(h: Hike): void {
-    const custom = store.get<Hike[]>("hike:library") ?? [];
+    const custom = (store.get<Hike[]>("hike:library") ?? []).filter((x) => x.id !== h.id);
     custom.push(h);
     store.set("hike:library", custom);
   },

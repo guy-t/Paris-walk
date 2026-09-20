@@ -21,7 +21,7 @@ this locally" — if it cannot happen in CI, it needs saying out loud.
 packages/core     geometry, map-matching, the GPS tracker, sessions, GPX,
                   sun times, Overpass and Wikipedia clients, offline tiles.
                   No React, no Leaflet, no DOM beyond the browser APIs that
-                  are the point. 160 unit tests.
+                  are the point. 180 unit tests.
 packages/ui       MapView, ElevationProfile, Sheet, StatTile, Toast, and the
                   geolocation / wake-lock / service-worker hooks.
 apps/web          one Vite app, one HTML entry per guide, two build targets.
@@ -97,6 +97,21 @@ About, and in the launcher's footer. A local build says `dev`. The short
 commit is the point: an APK that silently failed to update looks exactly
 like one built without the change, and the phone can now be asked.
 
+**A .gpx has no MIME type Android agrees on.** Providers report one as
+`application/gpx+xml`, `application/xml`, `text/xml` or
+`application/octet-stream`, depending on which app is sending. So an
+`accept` filter on a file input greys out the very file being reached for —
+the picker is left unfiltered on Android and iOS (`gpxAccept`) and what was
+picked is checked by parsing it. The intent-filters list every one of those
+types for the same reason, `octet-stream` included, which is why the app also
+appears in "Open with" for other unrecognised files.
+
+**Capacitor delivers the launching intent twice.** `BridgeActivity.load()`
+calls `onNewIntent(getIntent())` from inside `super.onCreate()`, so an
+override sees the launch intent there as well as in `onCreate`. Without a
+guard, one tap on an attachment imports the route twice. `MainActivity` marks
+each intent with a `HANDLED` extra as it reads it.
+
 **Always send `Cache-Control: no-cache` when checking the live site.** The
 Pages CDN caches 404s, so a path a deploy just added keeps answering 404.
 
@@ -105,7 +120,7 @@ Pages CDN caches 404s, so a path a deploy just added keeps answering 404.
 ```bash
 pnpm install
 pnpm typecheck          # tsc --build across all projects
-pnpm test               # vitest, 160 tests
+pnpm test               # vitest, 180 tests
 pnpm build              # web build for Pages
 pnpm --filter @slownav/web build:native   # payload for the APK
 pnpm --filter @slownav/web dev            # local dev server

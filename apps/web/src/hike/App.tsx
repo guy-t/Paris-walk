@@ -48,6 +48,8 @@ import {
 import { positionWatcher } from "../shared/geolocation.js";
 import { wantsServiceWorker } from "../shared/platform.js";
 import { APP_VERSION } from "../shared/version.js";
+import { onOpenedFiles } from "../shared/openedFiles.js";
+import { importGpxFiles, importMessage } from "./importGpx.js";
 import { useHike } from "./useHike.js";
 import "./hike.css";
 
@@ -164,6 +166,23 @@ export function App() {
     document.addEventListener("click", close);
     return () => document.removeEventListener("click", close);
   }, [menuOpen]);
+
+  // ---- a route opened or shared from elsewhere on the phone ----
+  //
+  // Tapping a .gpx in Files or in a mail attachment is how a route actually
+  // arrives, and it beats hunting through a picker for it. The shell reads
+  // the file; this puts it in the library, says so, and shows the list so
+  // the walk is one tap away rather than somewhere unseen.
+  useEffect(
+    () =>
+      onOpenedFiles((files) => {
+        const result = importGpxFiles(files);
+        show(importMessage(result));
+        setLibraryNonce((n) => n + 1);
+        if (result.imported) setPanel("library");
+      }),
+    [show],
+  );
 
   // ---- body classes drive the panel and full-screen layouts ----
   useEffect(() => {

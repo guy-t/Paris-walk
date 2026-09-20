@@ -4,4 +4,6 @@
     <string name="title_activity_main">Slow Navigator</string>
     <string name="package_name">io.github.guyt.slownavigator</string>
     <string name="custom_url_scheme">io.github.guyt.slownavigator</string>
+    <!-- How the app names itself in Android's "Open with" and "Share" lists. -->
+    <string name="import_gpx">Import as a route</string>
 </resources>

@@ -13,11 +13,9 @@ import {
   sourceForProvider,
   downloadGPX,
   estimateMB,
-  parseGPX,
   precacheTiles,
   processTrack,
   records,
-  repairElevation,
   storageUsedMB,
   store,
   toGPX,
@@ -30,6 +28,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { APP, library, type Hike, type HikeSettings } from "./model.js";
 import { gpxAccept } from "../shared/platform.js";
+import { importGpxFiles, importMessage } from "./importGpx.js";
 
 /** A small SVG sparkline of the elevation profile, for the row. */
 function Thumb({ track }: { track: ProcessedTrack }) {
@@ -189,40 +188,16 @@ export function LibraryPanel({
   /**
    * Import whatever was picked.
    *
-   * The picker is unfiltered on a phone (see `gpxAccept`), so anything at all
-   * can arrive here and being handed something that is not a GPX is a normal
-   * outcome, not an error case to be surprised by. Each file is parsed, and
-   * the batch reports once: a toast per file means only the last is ever
-   * read, which with `multiple` on is the usual case.
+   * The picker is unfiltered on a phone (see `gpxAccept`), so anything at
+   * all can arrive here — being handed something that is not a GPX is a
+   * normal outcome, not a surprise. What happens to the contents is shared
+   * with routes opened from outside the app, so the two cannot drift.
    */
   const importFiles = async (files: FileList) => {
-    const failures: string[] = [];
-    let imported = 0;
-    let lastName = "";
-
-    for (const f of Array.from(files)) {
-      try {
-        const parsed = parseGPX(await f.text(), f.name.replace(/\.gpx$/i, ""));
-        library.add({
-          id: library.idFor(f.name, parsed.pts.length),
-          name: parsed.name,
-          pts: repairElevation(parsed.pts),
-          wpts: parsed.wpts,
-        });
-        imported++;
-        lastName = parsed.name;
-      } catch (err) {
-        failures.push(`${f.name}: ${err instanceof Error ? err.message : "could not be read"}`);
-      }
-    }
-
-    if (imported && !failures.length) {
-      onToast(imported === 1 ? `Imported ${lastName}` : `Imported ${imported} hikes`);
-    } else if (imported) {
-      onToast(`Imported ${imported}, skipped ${failures.length} — ${failures[0]}`);
-    } else {
-      onToast(failures[0] ?? "Nothing to import");
-    }
+    const incoming = await Promise.all(
+      Array.from(files).map(async (f) => ({ name: f.name, text: await f.text() })),
+    );
+    onToast(importMessage(importGpxFiles(incoming)));
     onChanged();
   };
 
