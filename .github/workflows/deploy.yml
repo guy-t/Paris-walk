@@ -41,13 +41,20 @@ jobs:
         with:
           enablement: true
 
+      - run: pnpm build
+
       - name: Assemble site
         run: |
           set -eux
           mkdir -p site
-          # The original single-file apps, served unchanged at their existing URLs.
+          # The original single-file apps, still serving their existing URLs.
+          # They stay until each port has been walked with and trusted.
           cp index.html hike.html canalmap.html pariswalk.html hike-sw.js site/
           cp -r tracks site/tracks
+          # The ported apps, published alongside at /next/ so both can be
+          # compared on the same phone.
+          mkdir -p site/next
+          cp -r apps/web/dist/. site/next/
           # Static artifact: no Jekyll processing.
           touch site/.nojekyll
 

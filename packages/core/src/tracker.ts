@@ -262,15 +262,13 @@ export class RouteTracker {
       heading: this.headingValue,
       global: this.lost,
     });
-    if (!windowed) return { ...base, speed, heading: this.headingValue };
-
     let progress = this.progress;
     let offRoute = this.offRoute;
-    let offDistance = windowed.dist;
+    let offDistance = windowed?.dist ?? Infinity;
     let resynced = false;
-    let match = windowed;
+    let match: Match | null = windowed;
 
-    if (windowed.dist <= threshold) {
+    if (windowed && windowed.dist <= threshold) {
       // On the route.
       this.onCount++;
       this.offCount = 0;
@@ -286,11 +284,18 @@ export class RouteTracker {
 
       // We might be on the route after all, just not where the window looked —
       // the other pass of a loop, or a stretch walked while the screen was off.
+      //
+      // This also covers `windowed` being null, which happens when the walker
+      // is further from every segment in the window than the match will even
+      // consider (driving to the far end of a long route, or reopening the
+      // app a valley away). Without consulting the whole line here, progress
+      // would never move again for the rest of the walk.
       const global = project(this.line, this.cum, pos, {
         ...this.cfg.match,
         global: true,
         heading: this.headingValue,
       });
+      if (!match) match = global;
       if (global && global.dist <= threshold && Math.abs(global.prog - this.progress) > this.cfg.jumpMin) {
         this.jumpCount++;
         if (this.jumpCount >= this.cfg.confirmJump) {
@@ -311,11 +316,18 @@ export class RouteTracker {
         offRoute = true;
         // A small wander off the pavement still makes progress along the line.
         const near = this.cfg.maxSnap == null ? 150 : Math.min(150, this.cfg.maxSnap);
-        if (windowed.dist < near && windowed.prog >= this.progress - 30) progress = windowed.prog;
+        if (windowed && windowed.dist < near && windowed.prog >= this.progress - 30) {
+          progress = windowed.prog;
+        }
       }
+      if (match) offDistance = match.dist;
     }
 
-    // A match hundreds of metres away is not evidence of anything.
+    // Nothing anywhere on the route was close enough to mean anything — an
+    // empty line, or a fix from another country. Hold everything.
+    if (!match) return { ...base, speed, heading: this.headingValue };
+
+    // A match hundreds of metres away is not evidence of where we are either.
     if (this.cfg.maxSnap != null && match.dist > this.cfg.maxSnap) progress = this.progress;
 
     this.progress = progress;

@@ -156,6 +156,51 @@ describe("RouteTracker", () => {
       expect(third.progress).toBeCloseTo(4020, -2);
     });
 
+    /**
+     * The window only searches segments near `lastProgress`, and `project`
+     * also skips any segment more than `maxOffset` (3 km) away. On a long
+     * route both can miss entirely — reopening the app at the far end of a
+     * 35 km track, say — and the windowed match comes back null. If that is
+     * treated as "no information", progress never moves again for the rest of
+     * the walk. It has to fall back to searching the whole line.
+     */
+    it("recovers when the walker is beyond the window's reach entirely", () => {
+      const long = eastLine(351); // 35 km, like the Potes–Cosgaya track
+      const longCum = cumulative(long);
+      const t = hikeTracker(long, longCum, HIKE_MATCH);
+      t.update(fixAt(0));
+      t.update(fixAt(300));
+      expect(t.progress).toBeCloseTo(300, -1);
+
+      // Now 30 km along: far outside the 1.5 km window, and further than
+      // maxOffset from every segment inside it.
+      const s = t.update(fixAt(30000));
+      expect(s.progress).toBeCloseTo(30000, -3);
+      expect(s.resynced).toBe(true);
+    });
+
+    it("keeps following normally after such a recovery", () => {
+      const long = eastLine(351);
+      const longCum = cumulative(long);
+      const t = hikeTracker(long, longCum, HIKE_MATCH);
+      t.update(fixAt(0));
+      t.update(fixAt(30000));
+      const s = t.update(fixAt(30100));
+      expect(s.progress).toBeCloseTo(30100, -2);
+      expect(s.offRoute).toBe(false);
+    });
+
+    it("holds position for a fix nowhere near the route at all", () => {
+      const t = walkTracker(line, cum, WALK_MATCH);
+      t.update(fixAt(0));
+      t.update(fixAt(200));
+      const before = t.progress;
+      // A fix in another country.
+      const s = t.update({ lat: -33.87, lon: 151.21, accuracy: 10, timestamp: clock += 5000 });
+      expect(s.progress).toBe(before);
+      expect(t.progress).toBe(before);
+    });
+
     it("does not re-sync for a jump smaller than jumpMin", () => {
       const t = walkTracker(line, cum, WALK_MATCH);
       t.update(fixAt(0));
