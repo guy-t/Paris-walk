@@ -35,8 +35,21 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
 
-      # Switches the Pages source to "GitHub Actions" (and enables Pages if it is off)
-      # so the owner never has to touch repository settings.
+      # Make GitHub Actions the Pages source, so the owner never has to open
+      # repository settings.
+      #
+      # actions/configure-pages' `enablement` only switches Pages *on*; on a
+      # site already publishing from a branch it leaves the source alone. That
+      # is not a loud failure — the branch keeps serving the committed files,
+      # so the old URLs work and the deploy looks green while the built output
+      # goes nowhere. Setting build_type explicitly is what actually moves it.
+      - name: Make GitHub Actions the Pages source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api -X PUT "repos/${{ github.repository }}/pages" -f build_type=workflow ||
+            gh api -X POST "repos/${{ github.repository }}/pages" -f build_type=workflow               -f "source[branch]=main" -f "source[path]=/"
+
       - uses: actions/configure-pages@v5
         with:
           enablement: true
@@ -73,3 +86,27 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
+      # Prove the live site is actually serving this build. A green deploy is
+      # not evidence on its own: when Pages was still publishing from the
+      # branch, every old URL kept working while the built output was never
+      # served at all.
+      - name: Check the live site is serving the artifact
+        run: |
+          set -eu
+          base="${{ steps.deployment.outputs.page_url }}"
+          for attempt in 1 2 3 4 5 6; do
+            sleep 10
+            code=$(curl -s -o /dev/null -w '%{http_code}' "${base}next/hike.html")
+            repo=$(curl -s -o /dev/null -w '%{http_code}' "${base}package.json")
+            echo "attempt ${attempt}: next/hike.html=${code} package.json=${repo}"
+            # The built page must be there, and a repo file that is not in the
+            # artifact must not be — that second check is what catches a
+            # branch deploy masquerading as a successful one.
+            if [ "$code" = "200" ] && [ "$repo" = "404" ]; then
+              echo "Live site is serving the built artifact."
+              exit 0
+            fi
+          done
+          echo "::error::The live site is not serving this build."
+          exit 1
