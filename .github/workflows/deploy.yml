@@ -43,12 +43,22 @@ jobs:
       # is not a loud failure — the branch keeps serving the committed files,
       # so the old URLs work and the deploy looks green while the built output
       # goes nowhere. Setting build_type explicitly is what actually moves it.
+      # Best effort: the Pages *settings* API needs repo-admin rights, which
+      # the default GITHUB_TOKEN does not have. It works if PAGES_ADMIN_TOKEN
+      # (a PAT with repo admin) is set as a secret; otherwise the source has
+      # to be set once by hand in Settings → Pages → Source → GitHub Actions.
+      # Either way the check at the end of the deploy job says whether the
+      # live site is really serving this build.
       - name: Make GitHub Actions the Pages source
+        continue-on-error: true
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.PAGES_ADMIN_TOKEN || github.token }}
         run: |
-          gh api -X PUT "repos/${{ github.repository }}/pages" -f build_type=workflow ||
-            gh api -X POST "repos/${{ github.repository }}/pages" -f build_type=workflow               -f "source[branch]=main" -f "source[path]=/"
+          if gh api -X PUT "repos/${{ github.repository }}/pages" -f build_type=workflow; then
+            echo "Pages source set to GitHub Actions."
+          else
+            echo "::warning::Could not set the Pages source automatically (needs repo-admin rights). If the deploy check below fails, set Settings → Pages → Source to 'GitHub Actions' once, by hand."
+          fi
 
       - uses: actions/configure-pages@v5
         with:
