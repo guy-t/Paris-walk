@@ -9,6 +9,9 @@
 
 :root {
   --bg: #f4f5f2; --panel: #ffffff; --ink: #1b2620; --muted: #67736c; --line: #e0e5e1;
+  /* --muted is 4.95:1 on white: enough indoors, thin in sunlight. Secondary
+     text that still has to be read outdoors uses --muted-strong (7.6:1). */
+  --muted-strong: #4a5751; --line-strong: #c6cec9;
   --accent: #2f4f3e; --track: #c2410c; --planned: #1d4ed8; --done: #9ca3af; --good: #15803d; --warn: #b91c1c; --amber: #b45309;
   --shadow: 0 1px 2px rgba(0,0,0,.06), 0 6px 20px rgba(0,0,0,.08);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -27,18 +30,69 @@ button { font: inherit; cursor: pointer; }
 
 header.bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; padding-top: max(8px, env(safe-area-inset-top)); background: var(--accent); color: #f3f7f4; }
 header.bar h1 { font-size: 15px; font-weight: 600; margin: 0; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
-header.bar button { background: rgba(255,255,255,.14); color: #fff; border: 0; border-radius: 999px; padding: 6px 11px; font-size: 13px; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
-header.bar button.on { background: #22c55e; color: #052e16; }
-header.bar button.busy { opacity: .7; }
+/*
+ * Header chrome, and only the header's own buttons.
+ *
+ * As `header.bar button` this also matched every item in the dropdown —
+ * which is inside the header — and beat `.menu-list button` on specificity
+ * (0,1,2 against 0,1,1). So each menu item was handed `color: #fff` and
+ * `display: inline-flex` meant for a pill on a dark green bar: white text on
+ * a white sheet, centred, with only the grey subtitle legible. The menu had
+ * no titles at all, which is a hard thing to report as a bug, because what
+ * you see is a list of descriptions.
+ */
+header.bar > button, header.bar .menu > button { background: rgba(255,255,255,.14); color: #fff; border: 0; border-radius: 999px; padding: 6px 11px; font-size: 13px; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+header.bar > button.on, header.bar .menu > button.on { background: #22c55e; color: #052e16; }
+header.bar > button.busy, header.bar .menu > button.busy { opacity: .7; }
 header.bar .menu { position: relative; }
-.menu-list { position: absolute; right: 0; top: 40px; background: var(--panel); color: var(--ink); border-radius: 12px; box-shadow: var(--shadow); min-width: 260px; z-index: 1200; padding: 6px; display: none; max-height: 80vh; overflow-y: auto; }
+/* The trigger is the way into half of what the app can do, so it is a
+   thumb-sized target with a word on it rather than a 13px glyph. */
+header.bar .menu > button { min-height: 40px; padding: 8px 14px; font-size: 14px; }
+
+.menu-list {
+  position: absolute; right: 0;
+  /* Anchored to the button rather than a fixed 40px, so a notch, a larger
+     font or a taller trigger cannot leave the list overlapping the header. */
+  top: calc(100% + 6px);
+  background: var(--panel); color: var(--ink);
+  border: 1px solid var(--line-strong); border-radius: 12px; box-shadow: var(--shadow);
+  min-width: 272px; max-width: min(92vw, 340px);
+  z-index: 1200; padding: 6px; display: none;
+  /* Measured from the viewport, not 80vh from an offset top: 80vh plus the
+     header is taller than the screen in landscape, which put the last items
+     below the bottom edge with nothing to say they were there. */
+  max-height: calc(100dvh - 72px); overflow-y: auto; overscroll-behavior: contain;
+  /* When the list is taller than the screen it scrolls, and used to do so
+     with nothing to say so. These fade at whichever end still has items:
+     `local` gradients move with the content, `scroll` ones stay put and are
+     covered by the first pair until there is something to scroll to. */
+  background:
+    linear-gradient(var(--panel) 30%, rgba(255,255,255,0)) top / 100% 20px no-repeat local,
+    linear-gradient(rgba(255,255,255,0), var(--panel) 70%) bottom / 100% 20px no-repeat local,
+    radial-gradient(farthest-side at 50% 0, rgba(27,38,32,.16), rgba(27,38,32,0)) top / 100% 9px no-repeat scroll,
+    radial-gradient(farthest-side at 50% 100%, rgba(27,38,32,.16), rgba(27,38,32,0)) bottom / 100% 9px no-repeat scroll,
+    var(--panel);
+}
 .menu-list.open { display: block; }
-.menu-list button, .menu-list label.row { display: block; width: 100%; text-align: left; background: none; color: var(--ink); border: 0; padding: 10px 12px; border-radius: 8px; font-size: 14px; cursor: pointer; }
-.menu-list button:hover { background: var(--bg); }
-.menu-list small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
-.menu-list hr { border: 0; border-top: 1px solid var(--line); margin: 6px 0; }
-.menu-list label.row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.menu-list label.row span { font-size: 13px; color: var(--muted); }
+.menu-list button, .menu-list label.row {
+  display: flex; flex-direction: column; justify-content: center;
+  width: 100%; min-height: 44px; text-align: left;
+  background: none; color: var(--ink); border: 0;
+  padding: 9px 12px; border-radius: 8px; font-size: 15px; line-height: 1.25; cursor: pointer;
+}
+/* Hover is a lie on a touch screen — it sticks to the last thing tapped — so
+   the highlight is a real press state instead. */
+@media (hover: hover) { .menu-list button:hover { background: var(--bg); } }
+.menu-list button:active, .menu-list label.row:active { background: #e7ebe7; }
+.menu-list button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.menu-list small { display: block; color: var(--muted-strong); font-size: 12.5px; line-height: 1.3; margin-top: 2px; }
+.menu-list hr { border: 0; border-top: 1px solid var(--line-strong); margin: 6px 4px; }
+.menu-list label.row { flex-direction: row; align-items: center; justify-content: space-between; gap: 10px; }
+.menu-list label.row span { flex: 1; min-width: 0; font-size: 14px; color: var(--ink); }
+.menu-list input[type="checkbox"] { flex: 0 0 auto; width: 22px; height: 22px; accent-color: var(--accent); }
+/* Which build this is, where it is looked for: at the bottom of the menu,
+   selectable so it can be typed into a message. */
+.menu-list .build { display: block; padding: 8px 12px 4px; color: var(--muted-strong); font-size: 12px; user-select: text; }
 
 /* ---------- dashboard ---------- */
 .dash { display: block; background: var(--panel); border-bottom: 1px solid var(--line); }

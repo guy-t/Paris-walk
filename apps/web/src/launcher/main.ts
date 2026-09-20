@@ -11,11 +11,18 @@
  */
 
 import { isNative, openExternal, WEB_BASE } from "../shared/platform.js";
+import { APP_VERSION } from "../shared/version.js";
 
 /** Apps still served as the original HTML, which the native build links out to. */
 const WEB_ONLY = new Set(["canalmap.html", "pariswalk.html"]);
 
 function init(): void {
+  // Which build this is, on the first screen the shell opens. An APK that
+  // silently failed to update is indistinguishable from one built without
+  // the change, unless it can be asked.
+  const build = document.getElementById("build");
+  if (build) build.textContent = `Build ${APP_VERSION}`;
+
   if (!isNative()) return;
 
   for (const link of document.querySelectorAll<HTMLAnchorElement>("a.app[data-web]")) {

@@ -49,6 +49,18 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
 
+      # Worked out before the web build, not after, because the app itself
+      # now shows this string: an APK that quietly failed to update looks
+      # exactly like one built without the change, and the only way to tell
+      # from a hillside is to ask the app which build it is. The short commit
+      # goes in too, so the answer can be read straight off the repository.
+      - name: Work out the version
+        run: |
+          set -eu
+          VERSION_NAME="$(date -u +%Y.%m.%d).${{ github.run_number }}"
+          echo "VERSION_NAME=${VERSION_NAME}" >> "$GITHUB_ENV"
+          echo "SLOWNAV_VERSION=${VERSION_NAME} apk ${GITHUB_SHA:0:7}" >> "$GITHUB_ENV"
+
       # The native build differs from the web one only in its base path:
       # relative, so assets resolve from the device rather than from a path on
       # a domain. Shipping the Pages build inside the APK would point every
@@ -61,15 +73,14 @@ jobs:
         run: pnpm sync
 
       # versionCode must increase for every build Android is asked to install
-      # over the last one; the run number is monotonic and free.
-      - name: Stamp the version
+      # over the last one; the run number is monotonic and free. The name is
+      # the one already worked out above, so the package and the screen agree.
+      - name: Stamp the version into the package
         working-directory: apps/mobile/android
         run: |
           set -eu
-          VERSION_NAME="$(date -u +%Y.%m.%d).${{ github.run_number }}"
           sed -i "s/versionCode 1/versionCode ${{ github.run_number }}/" app/build.gradle
           sed -i "s/versionName \"1.0\"/versionName \"${VERSION_NAME}\"/" app/build.gradle
-          echo "VERSION_NAME=${VERSION_NAME}" >> "$GITHUB_ENV"
           grep -E "versionCode|versionName" app/build.gradle
 
       # Android identifies an app by package name AND signing key, and refuses

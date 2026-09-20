@@ -64,7 +64,11 @@ jobs:
         with:
           enablement: true
 
-      - run: pnpm build
+      # Stamped into the app so the site can say which build it is serving,
+      # in the same place the APK says it. The channel is part of the string
+      # because the two workflows have their own run numbers.
+      - name: Build the site
+        run: SLOWNAV_VERSION="$(date -u +%Y.%m.%d).${{ github.run_number }} web ${GITHUB_SHA:0:7}" pnpm build
 
       - name: Assemble site
         run: |
