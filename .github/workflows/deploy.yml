@@ -1,0 +1,53 @@
+name: Deploy
+
+# Every push to main publishes the site to GitHub Pages. Nothing is ever uploaded by hand.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time; never cancel a run that is already publishing.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Switches the Pages source to "GitHub Actions" (and enables Pages if it is off)
+      # so the owner never has to touch repository settings.
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: Assemble site
+        run: |
+          set -eux
+          mkdir -p site
+          # The original single-file apps, served unchanged at their existing URLs.
+          cp index.html hike.html canalmap.html pariswalk.html hike-sw.js site/
+          cp -r tracks site/tracks
+          # Static artifact: no Jekyll processing.
+          touch site/.nojekyll
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

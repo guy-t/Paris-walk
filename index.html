@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#2f4f3e">
+  <title>Slow Navigator</title>
+  <style>
+    :root {
+      --bg: #f4f5f2; --panel: #ffffff; --ink: #1b2620; --muted: #67736c; --line: #e0e5e1;
+      --accent: #2f4f3e;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .06), 0 6px 20px rgba(0, 0, 0, .08);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body { background: var(--bg); color: var(--ink); -webkit-tap-highlight-color: transparent; }
+
+    header.bar {
+      display: flex; align-items: center; gap: 8px;
+      padding: 10px 14px; padding-top: max(10px, env(safe-area-inset-top));
+      background: var(--accent); color: #f3f7f4;
+    }
+    header.bar h1 { font-size: 16px; font-weight: 600; margin: 0; }
+
+    main { max-width: 640px; margin: 0 auto; padding: 16px 14px 40px; }
+    p.lede { color: var(--muted); font-size: 14px; line-height: 1.5; margin: 4px 0 18px; }
+
+    a.app {
+      display: block; background: var(--panel); border-radius: 14px; box-shadow: var(--shadow);
+      padding: 14px 16px; margin-bottom: 12px; text-decoration: none; color: inherit;
+    }
+    a.app:active { transform: scale(.995); }
+    a.app h2 { margin: 0 0 4px; font-size: 16px; font-weight: 600; }
+    a.app span { display: block; color: var(--muted); font-size: 13px; line-height: 1.45; }
+
+    footer { color: var(--muted); font-size: 12px; text-align: center; margin-top: 24px; line-height: 1.6; }
+    footer a { color: var(--muted); }
+  </style>
+</head>
+
+<body>
+  <header class="bar">
+    <h1>Slow Navigator</h1>
+  </header>
+  <main>
+    <p class="lede">Three offline-friendly companions for travelling slowly — on foot, on a hill, or on the water.</p>
+
+    <a class="app" href="hike.html">
+      <h2>Picos Hikes</h2>
+      <span>Five tracks in the Picos de Europa. Follow the line, climb left, ETA, elevation profile — and it keeps
+        working with no signal.</span>
+    </a>
+
+    <a class="app" href="canalmap.html">
+      <h2>Yonne &amp; Nivernais</h2>
+      <span>Migennes to Tannay by boat. Next lock and its hours, bridges, moorings and hazards ahead on the
+        water.</span>
+    </a>
+
+    <a class="app" href="pariswalk.html">
+      <h2>Paris Walk</h2>
+      <span>Turn-by-turn walking on footpaths, with the sights worth looking up along the way. Plan a new walk from a
+        list of places.</span>
+    </a>
+
+    <footer>
+      Maps © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors ·
+      <a href="https://github.com/guy-t/Paris-walk">source</a>
+    </footer>
+  </main>
+</body>
+
+</html>

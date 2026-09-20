@@ -1,0 +1,242 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="ChatGPT" xmlns="http://www.topografix.com/GPX/1/1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">
+  <metadata>
+    <name>Paris: Rue Guénégaud – Montmartre – Notre-Dame Loop</name>
+    <desc>Sightseeing walk starting and finishing at 19 Rue Guénégaud, Paris.</desc>
+  </metadata>
+  <wpt lat="48.8557053" lon="2.3388305">
+    <name>19 Rue Guénégaud</name>
+    <desc>Start and finish</desc>
+  </wpt>
+  <wpt lat="48.8566500" lon="2.3411200">
+    <name>Pont Neuf</name>
+    <desc>Cross toward the Right Bank</desc>
+  </wpt>
+  <wpt lat="48.8637600" lon="2.3367300">
+    <name>Palais Royal</name>
+    <desc>Gardens and courtyard</desc>
+  </wpt>
+  <wpt lat="48.8652000" lon="2.3472000">
+    <name>Rue Montorgueil</name>
+    <desc>Market and café street</desc>
+  </wpt>
+  <wpt lat="48.8712000" lon="2.3410200">
+    <name>Passage des Panoramas</name>
+    <desc>Historic covered passage</desc>
+  </wpt>
+  <wpt lat="48.8844200" lon="2.3386400">
+    <name>Place des Abbesses</name>
+    <desc>Gateway into Montmartre</desc>
+  </wpt>
+  <wpt lat="48.8871700" lon="2.3368700">
+    <name>Moulin de la Galette</name>
+    <desc>Historic Montmartre landmark</desc>
+  </wpt>
+  <wpt lat="48.8887200" lon="2.3387400">
+    <name>Rue de l'Abreuvoir</name>
+    <desc>Picturesque Montmartre street</desc>
+  </wpt>
+  <wpt lat="48.8886500" lon="2.3402200">
+    <name>Clos Montmartre</name>
+    <desc>Montmartre vineyard</desc>
+  </wpt>
+  <wpt lat="48.8864700" lon="2.3408400">
+    <name>Place du Tertre</name>
+    <desc>Artists' square</desc>
+  </wpt>
+  <wpt lat="48.8867000" lon="2.3431000">
+    <name>Sacré-Cœur</name>
+    <desc>Main Montmartre stop</desc>
+  </wpt>
+  <wpt lat="48.8583400" lon="2.3374500">
+    <name>Pont des Arts</name>
+    <desc>Return via the Seine</desc>
+  </wpt>
+  <wpt lat="48.8530000" lon="2.3499000">
+    <name>Notre-Dame</name>
+    <desc>Afternoon cathedral stop</desc>
+  </wpt>
+  <rte>
+    <name>Rue Guénégaud – Montmartre – Notre-Dame Loop</name>
+    <desc>Approximate sightseeing route; use pedestrian routing between route points where supported.</desc>
+    <rtept lat="48.8557053" lon="2.3388305">
+      <name>19 Rue Guénégaud - start</name>
+    </rtept>
+    <rtept lat="48.8562000" lon="2.3395500">
+      <name>Quai de Conti</name>
+    </rtept>
+    <rtept lat="48.8566500" lon="2.3411200">
+      <name>Pont Neuf</name>
+    </rtept>
+    <rtept lat="48.8585500" lon="2.3405000">
+      <name>Quai du Louvre</name>
+    </rtept>
+    <rtept lat="48.8606300" lon="2.3376200">
+      <name>Cour Carrée du Louvre</name>
+    </rtept>
+    <rtept lat="48.8637600" lon="2.3367300">
+      <name>Palais Royal</name>
+    </rtept>
+    <rtept lat="48.8629100" lon="2.3471300">
+      <name>Rue Montorgueil south</name>
+    </rtept>
+    <rtept lat="48.8663500" lon="2.3472700">
+      <name>Rue Montorgueil north</name>
+    </rtept>
+    <rtept lat="48.8712000" lon="2.3410200">
+      <name>Passage des Panoramas</name>
+    </rtept>
+    <rtept lat="48.8760000" lon="2.3396000">
+      <name>Notre-Dame-de-Lorette / Rue des Martyrs</name>
+    </rtept>
+    <rtept lat="48.8801000" lon="2.3391500">
+      <name>Rue des Martyrs mid</name>
+    </rtept>
+    <rtept lat="48.8844200" lon="2.3386400">
+      <name>Place des Abbesses</name>
+    </rtept>
+    <rtept lat="48.8861100" lon="2.3347500">
+      <name>Rue Lepic</name>
+    </rtept>
+    <rtept lat="48.8871700" lon="2.3368700">
+      <name>Moulin de la Galette</name>
+    </rtept>
+    <rtept lat="48.8887200" lon="2.3387400">
+      <name>Rue de l'Abreuvoir</name>
+    </rtept>
+    <rtept lat="48.8886500" lon="2.3402200">
+      <name>Clos Montmartre</name>
+    </rtept>
+    <rtept lat="48.8864700" lon="2.3408400">
+      <name>Place du Tertre</name>
+    </rtept>
+    <rtept lat="48.8867000" lon="2.3431000">
+      <name>Sacré-Cœur</name>
+    </rtept>
+    <rtept lat="48.8788500" lon="2.3394500">
+      <name>Rue des Martyrs southbound</name>
+    </rtept>
+    <rtept lat="48.8716300" lon="2.3426500">
+      <name>Grands Boulevards</name>
+    </rtept>
+    <rtept lat="48.8637600" lon="2.3367300">
+      <name>Palais Royal return</name>
+    </rtept>
+    <rtept lat="48.8606100" lon="2.3376400">
+      <name>Louvre courtyard</name>
+    </rtept>
+    <rtept lat="48.8583400" lon="2.3374500">
+      <name>Pont des Arts</name>
+    </rtept>
+    <rtept lat="48.8566000" lon="2.3370000">
+      <name>Quai de Conti return</name>
+    </rtept>
+    <rtept lat="48.8532000" lon="2.3438500">
+      <name>Saint-Michel</name>
+    </rtept>
+    <rtept lat="48.8530000" lon="2.3499000">
+      <name>Notre-Dame</name>
+    </rtept>
+    <rtept lat="48.8554500" lon="2.3443000">
+      <name>Quai des Orfèvres</name>
+    </rtept>
+    <rtept lat="48.8566500" lon="2.3411200">
+      <name>Pont Neuf return</name>
+    </rtept>
+    <rtept lat="48.8557053" lon="2.3388305">
+      <name>19 Rue Guénégaud - finish</name>
+    </rtept>
+  </rte>
+  <trk>
+    <name>Rue Guénégaud – Montmartre – Notre-Dame Loop</name>
+    <trkseg>
+      <trkpt lat="48.8557053" lon="2.3388305">
+        <name>19 Rue Guénégaud - start</name>
+      </trkpt>
+      <trkpt lat="48.8562000" lon="2.3395500">
+        <name>Quai de Conti</name>
+      </trkpt>
+      <trkpt lat="48.8566500" lon="2.3411200">
+        <name>Pont Neuf</name>
+      </trkpt>
+      <trkpt lat="48.8585500" lon="2.3405000">
+        <name>Quai du Louvre</name>
+      </trkpt>
+      <trkpt lat="48.8606300" lon="2.3376200">
+        <name>Cour Carrée du Louvre</name>
+      </trkpt>
+      <trkpt lat="48.8637600" lon="2.3367300">
+        <name>Palais Royal</name>
+      </trkpt>
+      <trkpt lat="48.8629100" lon="2.3471300">
+        <name>Rue Montorgueil south</name>
+      </trkpt>
+      <trkpt lat="48.8663500" lon="2.3472700">
+        <name>Rue Montorgueil north</name>
+      </trkpt>
+      <trkpt lat="48.8712000" lon="2.3410200">
+        <name>Passage des Panoramas</name>
+      </trkpt>
+      <trkpt lat="48.8760000" lon="2.3396000">
+        <name>Notre-Dame-de-Lorette / Rue des Martyrs</name>
+      </trkpt>
+      <trkpt lat="48.8801000" lon="2.3391500">
+        <name>Rue des Martyrs mid</name>
+      </trkpt>
+      <trkpt lat="48.8844200" lon="2.3386400">
+        <name>Place des Abbesses</name>
+      </trkpt>
+      <trkpt lat="48.8861100" lon="2.3347500">
+        <name>Rue Lepic</name>
+      </trkpt>
+      <trkpt lat="48.8871700" lon="2.3368700">
+        <name>Moulin de la Galette</name>
+      </trkpt>
+      <trkpt lat="48.8887200" lon="2.3387400">
+        <name>Rue de l'Abreuvoir</name>
+      </trkpt>
+      <trkpt lat="48.8886500" lon="2.3402200">
+        <name>Clos Montmartre</name>
+      </trkpt>
+      <trkpt lat="48.8864700" lon="2.3408400">
+        <name>Place du Tertre</name>
+      </trkpt>
+      <trkpt lat="48.8867000" lon="2.3431000">
+        <name>Sacré-Cœur</name>
+      </trkpt>
+      <trkpt lat="48.8788500" lon="2.3394500">
+        <name>Rue des Martyrs southbound</name>
+      </trkpt>
+      <trkpt lat="48.8716300" lon="2.3426500">
+        <name>Grands Boulevards</name>
+      </trkpt>
+      <trkpt lat="48.8637600" lon="2.3367300">
+        <name>Palais Royal return</name>
+      </trkpt>
+      <trkpt lat="48.8606100" lon="2.3376400">
+        <name>Louvre courtyard</name>
+      </trkpt>
+      <trkpt lat="48.8583400" lon="2.3374500">
+        <name>Pont des Arts</name>
+      </trkpt>
+      <trkpt lat="48.8566000" lon="2.3370000">
+        <name>Quai de Conti return</name>
+      </trkpt>
+      <trkpt lat="48.8532000" lon="2.3438500">
+        <name>Saint-Michel</name>
+      </trkpt>
+      <trkpt lat="48.8530000" lon="2.3499000">
+        <name>Notre-Dame</name>
+      </trkpt>
+      <trkpt lat="48.8554500" lon="2.3443000">
+        <name>Quai des Orfèvres</name>
+      </trkpt>
+      <trkpt lat="48.8566500" lon="2.3411200">
+        <name>Pont Neuf return</name>
+      </trkpt>
+      <trkpt lat="48.8557053" lon="2.3388305">
+        <name>19 Rue Guénégaud - finish</name>
+      </trkpt>
+    </trkseg>
+  </trk>
+</gpx>
