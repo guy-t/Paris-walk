@@ -21,7 +21,7 @@ this locally" — if it cannot happen in CI, it needs saying out loud.
 packages/core     geometry, map-matching, the GPS tracker, sessions, GPX,
                   sun times, Overpass and Wikipedia clients, offline tiles.
                   No React, no Leaflet, no DOM beyond the browser APIs that
-                  are the point. 180 unit tests.
+                  are the point. 185 unit tests.
 packages/ui       MapView, ElevationProfile, Sheet, StatTile, Toast, and the
                   geolocation / wake-lock / service-worker hooks.
 apps/web          one Vite app, one HTML entry per guide, two build targets.
@@ -112,6 +112,14 @@ override sees the launch intent there as well as in `onCreate`. Without a
 guard, one tap on an attachment imports the route twice. `MainActivity` marks
 each intent with a `HANDLED` extra as it reads it.
 
+**`store.set` returns false; it does not throw.** A full quota or switched-off
+site data both land there. Ignoring the result is how a hike gets imported,
+announced, and never saved — missing from the list then and after a restart,
+with the app insisting it arrived. Callers that are storing something the
+walker will look for must check it. Menu → Storage & saved data reports what
+is stored and whether a 64 kB write actually succeeds, which is the only
+honest way to ask: localStorage never states its limit.
+
 **Always send `Cache-Control: no-cache` when checking the live site.** The
 Pages CDN caches 404s, so a path a deploy just added keeps answering 404.
 
@@ -120,7 +128,7 @@ Pages CDN caches 404s, so a path a deploy just added keeps answering 404.
 ```bash
 pnpm install
 pnpm typecheck          # tsc --build across all projects
-pnpm test               # vitest, 180 tests
+pnpm test               # vitest, 185 tests
 pnpm build              # web build for Pages
 pnpm --filter @slownav/web build:native   # payload for the APK
 pnpm --filter @slownav/web dev            # local dev server

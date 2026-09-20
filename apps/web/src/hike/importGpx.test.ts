@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { importGpxFiles, importMessage } from "./importGpx.js";
 import { library } from "./model.js";
 
@@ -49,6 +49,30 @@ describe("importGpxFiles", () => {
     importGpxFiles([file]);
     importGpxFiles([file]);
     expect(custom()).toHaveLength(1);
+  });
+
+  it("says so when a route parses but cannot be saved", () => {
+    // A full quota is the one failure that used to be invisible: store.set
+    // returns false rather than throwing, and the app said "Imported".
+    const setItem = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(() => {
+        throw new DOMException("exceeded the quota", "QuotaExceededError");
+      });
+    try {
+      const r = importGpxFiles([{ name: "day-three.gpx", text: GPX("Day three") }]);
+      expect(r.imported).toBe(0);
+      expect(r.failures[0]).toContain("could not be saved");
+      expect(importMessage(r)).toContain("could not be saved");
+    } finally {
+      setItem.mockRestore();
+    }
+  });
+
+  it("keeps the built-in hikes when the stored library is not a list", () => {
+    localStorage.setItem("hike:library", '"not an array"');
+    expect(library.list().length).toBeGreaterThan(0);
+    expect(() => library.list()).not.toThrow();
   });
 
   it("gives an importable route with no track name a name from the file", () => {

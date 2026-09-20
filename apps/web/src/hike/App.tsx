@@ -15,6 +15,7 @@ import {
   project,
   records,
   store,
+  storageReport,
   suggestProvider,
   tileUrl as providerTileUrl,
   toGPX,
@@ -389,6 +390,10 @@ export function App() {
               />
             </label>
             <hr />
+            <button onClick={() => { setMenuOpen(false); alert(storageText()); }}>
+              Storage &amp; saved data
+              <small>What is stored, and whether anything more will fit</small>
+            </button>
             <button onClick={() => { setMenuOpen(false); alert(aboutText(provider.name)); }}>
               About &amp; data sources
             </button>
@@ -578,6 +583,28 @@ function escapeHtml(s: string): string {
     (c) =>
       ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] as string,
   );
+}
+
+/**
+ * What is saved, and whether more will fit.
+ *
+ * A hike that imports and then is not in the list has either not been saved
+ * or not been listed, and from a hillside those look the same. This says
+ * which, in words that can be read back down a phone line.
+ */
+function storageText(): string {
+  const r = storageReport();
+  const lines = [
+    `Saved data: ${r.totalKB} kB in ${r.top.length ? "these keys" : "nothing yet"}`,
+    ...r.top.map((t) => `  ${t.key} — ${t.kB} kB`),
+    "",
+    r.canWrite
+      ? "A test write of 64 kB succeeded, so there is room to save a hike."
+      : `A test write of 64 kB FAILED: ${r.error ?? "no reason given"}`,
+    "",
+    `Build ${APP_VERSION}.`,
+  ];
+  return lines.join("\n");
 }
 
 const aboutText = (mapName: string): string => `Picos Hikes — part of Slow Navigator.

@@ -34,12 +34,18 @@ export function importGpxFiles(files: readonly IncomingFile[]): ImportResult {
     try {
       const parsed = parseGPX(file.text, file.name.replace(/\.gpx$/i, ""));
       const id = library.idFor(file.name, parsed.pts.length);
-      library.add({
+      const saved = library.add({
         id,
         name: parsed.name,
         pts: repairElevation(parsed.pts),
         wpts: parsed.wpts,
       });
+      if (!saved) {
+        // Parsed fine and could not be kept. Saying "Imported" here is how
+        // a hike goes missing with the app insisting it is there.
+        result.failures.push(`${file.name}: parsed, but could not be saved — storage is full`);
+        continue;
+      }
       result.imported++;
       result.lastName = parsed.name;
       result.lastId = id;

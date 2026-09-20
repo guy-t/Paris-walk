@@ -100,7 +100,10 @@ export interface WaypointAt extends Waypoint {
  */
 export const library = {
   list(): Hike[] {
-    const custom = store.get<Hike[]>("hike:library") ?? [];
+    const stored = store.get<Hike[]>("hike:library");
+    // Anything but an array means the key was left in a state nothing here
+    // wrote; the built-in hikes still have to come back.
+    const custom = Array.isArray(stored) ? stored : [];
     const builtin = (embedded as Hike[]).map((h) => ({
       ...h,
       pts: repairElevation(h.pts),
@@ -120,10 +123,16 @@ export const library = {
    * straight from an email makes re-importing the same file the ordinary
    * case rather than a slip, so it has to hold.
    */
-  add(h: Hike): void {
-    const custom = (store.get<Hike[]>("hike:library") ?? []).filter((x) => x.id !== h.id);
+  add(h: Hike): boolean {
+    const stored = store.get<Hike[]>("hike:library");
+    const custom = (Array.isArray(stored) ? stored : []).filter((x) => x.id !== h.id);
     custom.push(h);
-    store.set("hike:library", custom);
+    // store.set returns false rather than throwing — a full quota, or site
+    // data switched off. This used to be dropped on the floor, so a failed
+    // save looked exactly like a successful one: the app said "Imported",
+    // and the hike was not in the list, then or ever. Whether that is fatal
+    // is the caller's to decide, but it has to be told.
+    return store.set("hike:library", custom);
   },
   remove(id: string): void {
     store.set(
