@@ -16,3 +16,11 @@ test-results/
 dist-types/
 apps/*/vite.config.js
 apps/*/vite.config.d.ts
+
+# Capacitor: everything here is produced from apps/web's native build.
+apps/web/dist-native/
+apps/mobile/www/
+apps/mobile/android/app/src/main/assets/public/
+apps/mobile/android/app/src/main/assets/capacitor.config.json
+apps/mobile/ios/App/App/public/
+apps/mobile/ios/App/App/capacitor.config.json

@@ -28,9 +28,10 @@ export function useServiceWorker(scriptUrl: string): ServiceWorkerState {
   const [unsupported, setUnsupported] = useState(false);
 
   useEffect(() => {
-    // file:// and plain http have no service workers, and that is fine — it
-    // only means no offline, not no app.
-    if (!("serviceWorker" in navigator) || !window.isSecureContext) {
+    // An empty url means the caller does not want one at all (the native
+    // shell). file:// and plain http have no service workers either, and
+    // that is fine — it only means no offline, not no app.
+    if (!scriptUrl || !("serviceWorker" in navigator) || !window.isSecureContext) {
       setUnsupported(true);
       return;
     }

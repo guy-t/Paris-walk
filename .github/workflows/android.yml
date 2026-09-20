@@ -1,0 +1,108 @@
+name: Android
+
+# Builds an installable APK on every push to main and publishes it to a
+# release with a fixed tag, so there is always one stable URL to download from
+# a phone. The web deploy is a separate workflow; neither blocks the other.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/web/**"
+      - "apps/mobile/**"
+      - "packages/**"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/android.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write # to publish the APK as a release asset
+
+concurrency:
+  group: android
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: "platforms;android-36 build-tools;36.0.0 platform-tools"
+
+      - run: pnpm install --frozen-lockfile
+
+      # The same gates the web deploy runs. An APK that ships broken logic is
+      # worse than no APK, because it is already on the phone.
+      - run: pnpm typecheck
+      - run: pnpm test
+
+      # The native build differs from the web one only in its base path:
+      # relative, so assets resolve from the device rather than from a path on
+      # a domain. Shipping the Pages build inside the APK would point every
+      # asset at a URL the phone may have no signal to reach.
+      - name: Build the web app for the shell
+        run: pnpm --filter @slownav/web build:native
+
+      - name: Sync into the native project
+        working-directory: apps/mobile
+        run: pnpm sync
+
+      # versionCode must increase for every build Android is asked to install
+      # over the last one; the run number is monotonic and free.
+      - name: Stamp the version
+        working-directory: apps/mobile/android
+        run: |
+          set -eu
+          VERSION_NAME="$(date -u +%Y.%m.%d).${{ github.run_number }}"
+          sed -i "s/versionCode 1/versionCode ${{ github.run_number }}/" app/build.gradle
+          sed -i "s/versionName \"1.0\"/versionName \"${VERSION_NAME}\"/" app/build.gradle
+          echo "VERSION_NAME=${VERSION_NAME}" >> "$GITHUB_ENV"
+          grep -E "versionCode|versionName" app/build.gradle
+
+      - name: Build the APK
+        working-directory: apps/mobile/android
+        run: ./gradlew --no-daemon assembleDebug
+
+      - name: Name the artifact
+        run: |
+          set -eu
+          SRC=apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          test -f "$SRC"   # never publish a missing build
+          mkdir -p out
+          cp "$SRC" "out/slow-navigator-${VERSION_NAME}.apk"
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: slow-navigator-apk
+          path: out/*.apk
+          if-no-files-found: error
+
+      # A rolling release, so the download link never changes and can be
+      # bookmarked on the phone.
+      - name: Publish to the rolling release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          gh release delete android-latest --yes --cleanup-tag || true
+          gh release create android-latest out/*.apk \
+            --title "Slow Navigator — latest Android build" \
+            --notes "Built from ${{ github.sha }} on $(date -u +'%Y-%m-%d %H:%M') UTC.
+
+          Debug-signed, for sideloading. Android will ask you to allow installing from your browser the first time.
+
+          Download: https://github.com/${{ github.repository }}/releases/download/android-latest/slow-navigator-${VERSION_NAME}.apk"

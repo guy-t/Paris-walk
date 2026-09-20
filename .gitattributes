@@ -1,3 +1,8 @@
 * text=auto eol=lf
 *.gpx text eol=lf
 *.png binary
+
+# Gradle wrapper: the shell script must keep LF or it will not run on Linux.
+apps/mobile/android/gradlew text eol=lf
+apps/mobile/android/gradlew.bat text eol=crlf
+*.jar binary

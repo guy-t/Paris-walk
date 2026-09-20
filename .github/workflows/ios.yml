@@ -1,0 +1,68 @@
+name: iOS
+
+# Compiles the iOS app, unsigned, to prove the project stays buildable for
+# Apple's platform as well as Android.
+#
+# It does not produce anything installable: an IPA needs a paid Apple
+# developer account and a provisioning profile, neither of which exists here.
+# What this does catch is the thing that would otherwise rot silently — an
+# Android-only assumption creeping into the shared web layer or the Capacitor
+# config, discovered months later when someone first tries to build for iOS.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/web/**"
+      - "apps/mobile/**"
+      - "packages/**"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/ios.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ios
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build the web app for the shell
+        run: pnpm --filter @slownav/web build:native
+
+      - name: Sync into the native project
+        working-directory: apps/mobile
+        run: pnpm sync
+
+      # Capacitor 8 uses Swift Package Manager, so there is no CocoaPods step
+      # to run first — the scheme resolves its dependencies on build.
+      - name: Build (unsigned)
+        working-directory: apps/mobile/ios/App
+        run: |
+          set -eux
+          xcodebuild \
+            -scheme App \
+            -destination 'generic/platform=iOS Simulator' \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build
+
+      - name: Check the location usage strings are present
+        working-directory: apps/mobile/ios/App/App
+        run: |
+          set -eu
+          # iOS refuses location outright without these, and the refusal is
+          # silent — the app simply never receives a fix.
+          grep -q NSLocationWhenInUseUsageDescription Info.plist
+          echo "Location usage description present."

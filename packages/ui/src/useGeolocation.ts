@@ -8,12 +8,12 @@
  * watch is cleared on `visibilitychange` and restarted when the app comes
  * back.
  *
- * The cost is gaps in the recorded trail while the screen is off — the web
- * has no background location, and on Android only a native foreground service
- * can change that. What survives the gap is the *route* position: the first
- * fix after resuming is matched against the planned line, so distance done,
- * distance to go, climb left and ETA are all correct again immediately. Only
- * the breadcrumb has holes.
+ * The cost is gaps in the recorded trail while the screen is off. What
+ * survives the gap is the *route* position: the first fix after resuming is
+ * matched against the planned line, so distance done, distance to go, climb
+ * left and ETA are all correct again immediately. Only the breadcrumb has
+ * holes. A native build with a foreground service can close that gap, and
+ * does so by supplying a different `watcher` — nothing else changes.
  *
  * The fix history is cleared on resume, because the walker may be a long way
  * from where they were and a heading derived across the gap would be a lie.
@@ -31,6 +31,66 @@ export type GeolocationStatus =
   | "denied"
   | "unavailable";
 
+export interface WatchError {
+  message: string;
+  /** The user said no. Nothing will work until they change their mind. */
+  permissionDenied: boolean;
+}
+
+export interface WatchOptions {
+  enableHighAccuracy: boolean;
+  maximumAge: number;
+  timeout: number;
+}
+
+/**
+ * Where fixes come from.
+ *
+ * Abstracted so the native shell can supply the platform's own provider —
+ * which can be given a foreground service, and on iOS behaves better than the
+ * WebView's implementation — without the hook or the apps knowing.
+ */
+export interface PositionWatcher {
+  /** True if this provider can work here at all. */
+  available(): boolean;
+  /** Start watching. The returned handle is passed back to `clear`. */
+  watch(
+    onFix: (fix: Fix) => void,
+    onError: (err: WatchError) => void,
+    opts: WatchOptions,
+  ): Promise<unknown>;
+  clear(handle: unknown): void;
+}
+
+/** The browser's own Geolocation API. */
+export const browserWatcher: PositionWatcher = {
+  available: () => typeof navigator !== "undefined" && !!navigator.geolocation,
+  watch(onFix, onError, opts) {
+    const id = navigator.geolocation.watchPosition(
+      (p) =>
+        onFix({
+          lat: p.coords.latitude,
+          lon: p.coords.longitude,
+          accuracy: p.coords.accuracy || 50,
+          altitude: p.coords.altitude,
+          speed: p.coords.speed,
+          heading: p.coords.heading,
+          timestamp: p.timestamp || Date.now(),
+        }),
+      (err) =>
+        onError({
+          message: err.message,
+          permissionDenied: err.code === err.PERMISSION_DENIED,
+        }),
+      opts,
+    );
+    return Promise.resolve(id);
+  },
+  clear(handle) {
+    if (typeof handle === "number") navigator.geolocation.clearWatch(handle);
+  },
+};
+
 export interface UseGeolocationOptions {
   /** Called for every fix while tracking. */
   onFix: (fix: Fix) => void;
@@ -38,6 +98,8 @@ export interface UseGeolocationOptions {
   onError?: (message: string, permanent: boolean) => void;
   /** Called when tracking resumes after the app was hidden. */
   onResume?: () => void;
+  /** Defaults to the browser's Geolocation API. */
+  watcher?: PositionWatcher;
   enableHighAccuracy?: boolean;
   maximumAge?: number;
   timeout?: number;
@@ -57,6 +119,7 @@ export function useGeolocation({
   onFix,
   onError,
   onResume,
+  watcher = browserWatcher,
   enableHighAccuracy = true,
   maximumAge = 2000,
   timeout = 30000,
@@ -64,7 +127,9 @@ export function useGeolocation({
   const [tracking, setTracking] = useState(false);
   const [status, setStatus] = useState<GeolocationStatus>("off");
   const [visible, setVisible] = useState(() => !document.hidden);
-  const watchId = useRef<number | null>(null);
+
+  /** The live watch handle, or a promise for one that has not resolved yet. */
+  const handle = useRef<Promise<unknown> | null>(null);
 
   // Held in refs so starting and stopping the watch never depends on a
   // callback identity, which would restart the GPS on every render.
@@ -74,27 +139,29 @@ export function useGeolocation({
   onErrorRef.current = onError;
   const onResumeRef = useRef(onResume);
   onResumeRef.current = onResume;
+  const watcherRef = useRef(watcher);
+  watcherRef.current = watcher;
+
+  const stopWatch = useCallback(() => {
+    const pending = handle.current;
+    handle.current = null;
+    // The handle may still be in flight; clear it once it exists, so a stop
+    // issued immediately after a start cannot leave a watch running.
+    void pending?.then((h) => watcherRef.current.clear(h)).catch(() => {});
+  }, []);
 
   const startWatch = useCallback(() => {
-    if (watchId.current != null || !navigator.geolocation) return;
-    watchId.current = navigator.geolocation.watchPosition(
-      (p) => {
+    if (handle.current) return;
+    handle.current = watcherRef.current.watch(
+      (fix) => {
         setStatus("live");
-        onFixRef.current({
-          lat: p.coords.latitude,
-          lon: p.coords.longitude,
-          accuracy: p.coords.accuracy || 50,
-          altitude: p.coords.altitude,
-          speed: p.coords.speed,
-          heading: p.coords.heading,
-          timestamp: p.timestamp || Date.now(),
-        });
+        onFixRef.current(fix);
       },
       (err) => {
-        if (err.code === err.PERMISSION_DENIED) {
+        if (err.permissionDenied) {
           setStatus("denied");
           onErrorRef.current?.(
-            "Location permission was denied. Allow location for this site (the padlock icon in the address bar), then try again.",
+            "Location permission was denied. Allow location for this app, then try again.",
             true,
           );
         } else {
@@ -103,20 +170,25 @@ export function useGeolocation({
       },
       { enableHighAccuracy, maximumAge, timeout },
     );
+    void handle.current.catch((e: unknown) => {
+      handle.current = null;
+      setStatus("denied");
+      onErrorRef.current?.(
+        e instanceof Error ? e.message : "Location is not available.",
+        true,
+      );
+    });
   }, [enableHighAccuracy, maximumAge, timeout]);
 
-  const stopWatch = useCallback(() => {
-    if (watchId.current != null) navigator.geolocation.clearWatch(watchId.current);
-    watchId.current = null;
-  }, []);
-
   const start = useCallback(() => {
-    if (!navigator.geolocation) {
+    if (!watcherRef.current.available()) {
       setStatus("unavailable");
-      onErrorRef.current?.("Geolocation isn't available in this browser.", true);
+      onErrorRef.current?.("Location isn't available on this device.", true);
       return;
     }
-    if (!window.isSecureContext) {
+    // A browser will not hand out location over plain http. The native shell
+    // serves itself over https, so this check passes there too.
+    if (watcherRef.current === browserWatcher && !window.isSecureContext) {
       setStatus("unavailable");
       onErrorRef.current?.(
         "Location needs an https address. Open this from your GitHub Pages link rather than a local file.",

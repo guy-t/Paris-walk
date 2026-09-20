@@ -7,9 +7,14 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --build"
+    "typecheck": "tsc --build",
+    "build:native": "vite build --base ./ --outDir dist-native"
   },
   "dependencies": {
+    "@capacitor/app": "^8.1.1",
+    "@capacitor/browser": "^8.0.4",
+    "@capacitor/core": "^8.5.2",
+    "@capacitor/geolocation": "^8.2.2",
     "@slownav/core": "workspace:*",
     "@slownav/ui": "workspace:*",
     "leaflet": "^1.9.4",

@@ -36,6 +36,8 @@ import { LibraryPanel } from "./LibraryPanel.js";
 import { NearbySheet, tabForSight, type NearbyTab } from "./NearbySheet.js";
 import { SettingsPanel } from "./SettingsPanel.js";
 import { APP, library, loadSettings, saveSettings, type HikeSettings } from "./model.js";
+import { positionWatcher } from "../shared/geolocation.js";
+import { wantsServiceWorker } from "../shared/platform.js";
 import { useHike } from "./useHike.js";
 import "./hike.css";
 
@@ -71,9 +73,16 @@ export function App() {
   const [tick, setTick] = useState(0);
 
   const { toast, show, dismiss } = useToast();
-  const sw = useServiceWorker(`${import.meta.env.BASE_URL}sw.js`);
+  // Empty string disables registration: inside the native shell the assets
+  // are already local, and a cache over local files only adds a way for them
+  // to disagree.
+  const sw = useServiceWorker(wantsServiceWorker() ? `${import.meta.env.BASE_URL}sw.js` : "");
+
+  // Chosen once: the browser API in a tab, Capacitor's plugin in the shell.
+  const watcher = useMemo(() => positionWatcher(), []);
 
   const gps = useGeolocation({
+    watcher,
     onFix: hike.onFix,
     onError: (message, permanent) => {
       if (permanent) alert(message);

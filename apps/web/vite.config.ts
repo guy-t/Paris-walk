@@ -66,6 +66,8 @@ export default defineConfig({
   build: {
     rollupOptions: {
       input: {
+        // The launcher, which is also what the native shell opens into.
+        index: resolve(import.meta.dirname, "index.html"),
         hike: resolve(import.meta.dirname, "hike.html"),
       },
     },
