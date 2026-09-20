@@ -24,7 +24,13 @@ import { VitePWA } from "vite-plugin-pwa";
 export default defineConfig(({ mode }) => {
   const native = mode === "native";
 
+  // Stamped into the app so a walker can read back exactly which build is on
+  // the phone. CI sets it; a local build honestly says "dev".
+  const version = process.env.SLOWNAV_VERSION?.trim() || "dev";
+
   return {
+    define: { __APP_VERSION__: JSON.stringify(version) },
+
     // Relative in the shell so assets resolve from the device. Shipping the
     // Pages base inside the APK would point every asset at a URL the phone
     // may have no signal to reach.

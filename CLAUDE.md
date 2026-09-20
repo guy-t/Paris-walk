@@ -83,6 +83,20 @@ and overlap near borders on purpose; which map to prefer is the app's call via
 matched the sheet's list-card rule and inherited its 12px padding, silently
 tripling every dot on the map.
 
+**A header rule can reach into the menu.** `header.bar button` also matched
+every item in the dropdown — it lives inside the header — and beat
+`.menu-list button` on specificity, so each item was styled as a white pill
+for a dark green bar: white text on a white sheet. The menu rendered as a
+list of grey subtitles with no titles at all, which is nearly impossible to
+report as a bug. Header chrome is scoped to `header.bar > button` now. Check
+new header rules the same way.
+
+**The app says which build it is.** `SLOWNAV_VERSION` is stamped in by Vite
+from CI — `2026.09.20.6 apk 3bd1f22` — and shown at the foot of the menu, in
+About, and in the launcher's footer. A local build says `dev`. The short
+commit is the point: an APK that silently failed to update looks exactly
+like one built without the change, and the phone can now be asked.
+
 **Always send `Cache-Control: no-cache` when checking the live site.** The
 Pages CDN caches 404s, so a path a deploy just added keeps answering 404.
 

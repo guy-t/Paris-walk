@@ -47,6 +47,7 @@ import {
 } from "./model.js";
 import { positionWatcher } from "../shared/geolocation.js";
 import { wantsServiceWorker } from "../shared/platform.js";
+import { APP_VERSION } from "../shared/version.js";
 import { useHike } from "./useHike.js";
 import "./hike.css";
 
@@ -308,8 +309,12 @@ export function App() {
         </h1>
 
         <div className="menu">
-          <button onClick={(e) => { e.stopPropagation(); setMenuOpen((o) => !o); }} title="More">
-            ⋯
+          <button
+            onClick={(e) => { e.stopPropagation(); setMenuOpen((o) => !o); }}
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+          >
+            ☰ Menu
           </button>
           <div className={`menu-list ${menuOpen ? "open" : ""}`}>
             <button onClick={() => { toggleGps(); setMenuOpen(false); }}>
@@ -332,15 +337,18 @@ export function App() {
               }}
             >
               Prepare this hike for offline
-              <small>Downloads map tiles and sights for the route</small>
+              <small>Map tiles and sights, for no signal</small>
             </button>
             <button onClick={() => { setPanel("settings"); setMenuOpen(false); }}>
-              Settings<small>Pace, units, alerts</small>
+              Base map<small>{provider.name} — tap to change</small>
+            </button>
+            <button onClick={() => { setPanel("settings"); setMenuOpen(false); }}>
+              Settings<small>Pace, units, alerts, off-track distance</small>
             </button>
             <hr />
             <button onClick={() => { finish(); setMenuOpen(false); }}>
               Finish hike &amp; save stats
-              <small>Ends the session and stores the recorded track</small>
+              <small>Ends the session and saves the track</small>
             </button>
             <button onClick={() => { resetSession(); setMenuOpen(false); }}>
               Reset this hike's session<small>Clears recorded track and timers</small>
@@ -350,7 +358,7 @@ export function App() {
             </button>
             <hr />
             <label className="row">
-              <span style={{ color: "var(--ink)", fontSize: 14 }}>Keep screen on while tracking</span>
+              <span>Keep screen on while tracking</span>
               <input
                 type="checkbox"
                 checked={settings.wake}
@@ -362,9 +370,10 @@ export function App() {
               />
             </label>
             <hr />
-            <button onClick={() => { setMenuOpen(false); alert(ABOUT); }}>
+            <button onClick={() => { setMenuOpen(false); alert(aboutText(provider.name)); }}>
               About &amp; data sources
             </button>
+            <span className="build">Build {APP_VERSION}</span>
           </div>
         </div>
       </header>
@@ -552,9 +561,10 @@ function escapeHtml(s: string): string {
   );
 }
 
-const ABOUT = `Picos Hikes — part of Slow Navigator.
+const aboutText = (mapName: string): string => `Picos Hikes — part of Slow Navigator.
+Build ${APP_VERSION}.
 
-• Maps: OpenTopoMap (CC-BY-SA), stored on the phone when you prepare a hike for offline.
+• Maps: ${mapName}, stored on the phone when you prepare a hike for offline. Change it in Settings.
 • Sights: OpenStreetMap along the route plus Wikipedia articles nearby (English first, Spanish otherwise).
 • ETA: Tobler's hiking function, calibrated to your pace after twenty minutes.
 • Battery: GPS only runs while the app is on screen.
