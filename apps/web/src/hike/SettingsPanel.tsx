@@ -82,6 +82,19 @@ export function SettingsPanel({ settings, onSave, onClose, near }: SettingsPanel
         </p>
 
         <label>
+          Start GPS when a hike is opened
+          <input
+            type="checkbox"
+            checked={draft.gpsOnOpen}
+            onChange={(e) => set("gpsOnOpen", e.target.checked)}
+          />
+        </label>
+        <p className="hint">
+          The map still opens showing the whole route rather than jumping to you — tap the
+          arrow to follow.
+        </p>
+
+        <label>
           Units
           <select
             value={draft.units}

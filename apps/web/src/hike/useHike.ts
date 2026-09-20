@@ -9,6 +9,7 @@
 import {
   applyFix,
   cachedCount,
+  clearSession as clearStoredSession,
   corridorTiles,
   hikeTracker,
   loadSession,
@@ -234,8 +235,20 @@ export function useHike(settings: HikeSettings) {
   /** After the app was hidden, the next fix may be far away — forget the history. */
   const resumeTracking = useCallback(() => tracker.current?.reset(), []);
 
+  /**
+   * Forget the session, in memory and in storage, in that order.
+   *
+   * The order matters: anything that saves afterwards must find nothing to
+   * save. Deleting from storage first and clearing memory second left the
+   * next `save()` — which `endTracking` performs — writing the old session
+   * straight back, so "Reset" appeared to work and the walk reappeared the
+   * next time the hike was opened.
+   */
   const clearSession = useCallback(() => {
     sessionRef.current = null;
+    lastSaved.current = 0;
+    const id = stateRef.current.hike?.id;
+    if (id) clearStoredSession(APP, id);
     patch({ session: null, progress: 0 });
   }, [patch]);
 

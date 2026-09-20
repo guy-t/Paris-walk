@@ -126,3 +126,43 @@ describe("choosing a provider", () => {
     expect(listed).toEqual([...listed].sort((a, b) => (a === b ? 0 : a ? -1 : 1)));
   });
 });
+
+describe("zoom limits", () => {
+  it("lets every provider be zoomed past its own detail", () => {
+    // Beyond maxNativeZoom the tiles are upscaled and soft, but being able to
+    // zoom in is still what tells you which side of a contour you are on.
+    for (const p of MAP_PROVIDERS) {
+      expect(p.maxZoom).toBeGreaterThanOrEqual(p.maxNativeZoom);
+    }
+  });
+
+  it("does not claim the scanned topo sheet resolves detail it has not got", () => {
+    // MTN25 is a 1:25,000 sheet: past ~17 the server upscales rather than
+    // revealing anything, and the tile sizes collapse accordingly.
+    const topo = getProvider("ign-es");
+    expect(topo.maxNativeZoom).toBeLessThanOrEqual(17);
+    expect(topo.maxZoom).toBeGreaterThan(topo.maxNativeZoom);
+  });
+
+  it("claims real detail for aerial imagery, which has it", () => {
+    // Orthophotography at 0.25-0.5 m/pixel keeps resolving to the deepest zoom.
+    const aerial = getProvider("pnoa-es");
+    expect(aerial.maxNativeZoom).toBeGreaterThanOrEqual(19);
+  });
+});
+
+describe("aerial providers", () => {
+  it("offers Spanish imagery in Spain and French imagery in France", () => {
+    expect(covers(getProvider("pnoa-es"), POTES)).toBe(true);
+    expect(covers(getProvider("ortho-fr"), AUXERRE)).toBe(true);
+    expect(covers(getProvider("pnoa-es"), SYDNEY)).toBe(false);
+  });
+
+  it("never suggests aerial imagery on its own — it is a choice, not a default", () => {
+    // Photography is for looking closely at one spot, not for navigating by:
+    // it has no contours and no path classification.
+    expect(suggestProvider(POTES, []).id).not.toBe("pnoa-es");
+    expect(suggestProvider(AUXERRE, []).id).not.toBe("ortho-fr");
+  });
+});
+

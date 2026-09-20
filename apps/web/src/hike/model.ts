@@ -37,6 +37,14 @@ export interface HikeSettings {
   provider: string;
   /** Draw sights on the map. Off declutters it without losing the list. */
   showSights: boolean;
+  /**
+   * Start tracking as soon as a hike is open.
+   *
+   * On by default: the app is opened at the start of a walk far more often
+   * than it is browsed at home, and having to remember a button before
+   * setting off is exactly the kind of thing you remember an hour later.
+   */
+  gpsOnOpen: boolean;
 }
 
 /**
@@ -58,6 +66,7 @@ export const DEFAULT_SETTINGS: HikeSettings = {
   wake: false,
   provider: DEFAULT_PROVIDER_ID,
   showSights: true,
+  gpsOnOpen: true,
 };
 
 export function loadSettings(): HikeSettings {

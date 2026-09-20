@@ -114,6 +114,18 @@ export function MapView({
   const zoomedIn = useRef(false);
   const userZooming = useRef(false);
   const lastDoneAt = useRef(0);
+  /**
+   * A fit that has been asked for but could not be computed yet.
+   *
+   * Leaflet cannot work out a zoom for a container it thinks is zero pixels
+   * wide, and quietly settles on maximum zoom instead — so a map mounted
+   * inside a flex layout that has not settled, or a panel that is still
+   * hidden, ends up showing ten metres of hillside rather than the whole
+   * walk. The request is held here and applied once the container has a real
+   * size, which the ResizeObserver below reports.
+   */
+  const pendingFit = useRef<L.LatLngBounds | null>(null);
+  const tryFit = useRef<() => void>(() => {});
   // Read inside Leaflet handlers, which are registered once and would
   // otherwise close over a stale prop.
   const followRef = useRef(follow);
@@ -186,8 +198,28 @@ export function MapView({
       onMapClickRef.current?.([e.latlng.lat, e.latlng.lng]),
     );
 
-    const ro = new ResizeObserver(() => map.invalidateSize());
+    tryFit.current = () => {
+      const bounds = pendingFit.current;
+      if (!bounds) return;
+      // invalidateSize first: Leaflet caches the container size, and after a
+      // layout change its cached value is the stale zero we are recovering
+      // from.
+      map.invalidateSize();
+      const size = map.getSize();
+      if (size.x < 2 || size.y < 2) return; // still no layout; try again later
+      pendingFit.current = null;
+      map.fitBounds(bounds, { padding: [30, 30] });
+    };
+
+    const ro = new ResizeObserver(() => {
+      map.invalidateSize();
+      tryFit.current();
+    });
     ro.observe(hostRef.current);
+    // A ResizeObserver only reports a *change*. If the container reached its
+    // size before the map existed, no change is ever observed and a fit
+    // requested during that first render would wait forever.
+    map.on("resize", () => tryFit.current());
     return () => {
       ro.disconnect();
       map.remove();
@@ -301,11 +333,18 @@ export function MapView({
 
   // ---- imperative commands, driven by a bumped nonce ----
   useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !fitNonce || !planned?.length) return;
-    map.fitBounds(L.latLngBounds(planned.map((p) => [p[0], p[1]] as L.LatLngTuple)), {
-      padding: [30, 30],
-    });
+    if (!mapRef.current || !fitNonce || !planned?.length) return;
+    pendingFit.current = L.latLngBounds(planned.map((p) => [p[0], p[1]] as L.LatLngTuple));
+    tryFit.current();
+    // Layout often settles a frame or two after the effect runs — a flex
+    // child being measured, a panel opening. Retry briefly rather than rely
+    // on any single signal arriving.
+    const frame = requestAnimationFrame(() => tryFit.current());
+    const timers = [60, 250, 800].map((ms) => setTimeout(() => tryFit.current(), ms));
+    return () => {
+      cancelAnimationFrame(frame);
+      timers.forEach(clearTimeout);
+    };
   }, [fitNonce, planned]);
 
   useEffect(() => {

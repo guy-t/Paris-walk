@@ -8,7 +8,6 @@
 
 import {
   addRecord,
-  clearSession as clearStoredSession,
   createFormatter,
   downloadGPX,
   getProvider,
@@ -88,7 +87,9 @@ export function App() {
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [compact, setCompact] = useState(() => store.get<boolean>("hike:compact") === true);
   const [mapFull, setMapFull] = useState(false);
-  const [follow, setFollow] = useState(true);
+  // Starts off: opening a hike should show the whole walk, not a close-up of
+  // wherever you happen to be standing. Tapping the arrow locks on.
+  const [follow, setFollow] = useState(false);
   const [fitNonce, setFitNonce] = useState(0);
   const [centreNonce, setCentreNonce] = useState(0);
   const [resizeNonce, setResizeNonce] = useState(0);
@@ -106,11 +107,21 @@ export function App() {
   // Chosen once: the browser API in a tab, Capacitor's plugin in the shell.
   const watcher = useMemo(() => positionWatcher(), []);
 
+  /**
+   * Whether the walker asked for GPS, as opposed to it starting itself.
+   *
+   * A refusal deserves a dialog when someone just tapped "Start GPS", and
+   * deserves nothing louder than a toast when the app started the watch on
+   * its own — otherwise a phone with location switched off would greet you
+   * with an alert every single time you opened the app.
+   */
+  const gpsAsked = useRef(false);
+
   const gps = useGeolocation({
     watcher,
     onFix: hike.onFix,
     onError: (message, permanent) => {
-      if (permanent) alert(message);
+      if (permanent && gpsAsked.current) alert(message);
       else show(message);
     },
     onResume: hike.resumeTracking,
@@ -125,9 +136,8 @@ export function App() {
     const current = store.get<string>("hike:current");
     if (current && library.get(current)) {
       const opened = hike.openHike(current);
-      if (opened?.resumed) {
-        show("Resumed this hike's session — press GPS to continue tracking.");
-      }
+      setFitNonce((n) => n + 1);
+      if (opened?.resumed) show("Resumed this hike's session.");
       if (opened && !opened.hike.pts.length) return;
       if (opened && !store.get(`hike:sights:${current}`) && navigator.onLine) {
         void hike.loadSights(opened.hike, opened.track);
@@ -167,13 +177,29 @@ export function App() {
       setPanel("none");
       setFitNonce((n) => n + 1);
       if (!opened) return;
-      if (opened.resumed) show("Resumed this hike's session — press GPS to continue tracking.");
+      if (opened.resumed) show("Resumed this hike's session.");
       if (!store.get(`hike:sights:${id}`) && navigator.onLine) {
         void hike.loadSights(opened.hike, opened.track);
       }
     },
     [hike, show],
   );
+
+  /**
+   * Begin tracking as soon as there is a route, unless that was turned off.
+   *
+   * Once per app launch, never on a reopened panel — restarting the watch on
+   * every render would defeat the point of stopping it when the page hides.
+   */
+  const autoStarted = useRef(false);
+  useEffect(() => {
+    if (autoStarted.current || !settings.gpsOnOpen) return;
+    if (!state.track || gps.tracking) return;
+    autoStarted.current = true;
+    gpsAsked.current = false;
+    hike.beginSession();
+    gps.start();
+  }, [state.track, settings.gpsOnOpen, gps, hike]);
 
   const toggleGps = useCallback(() => {
     if (gps.tracking) {
@@ -185,6 +211,7 @@ export function App() {
       show("Choose a hike first.");
       return;
     }
+    gpsAsked.current = true;
     hike.beginSession();
     setFollow(true);
     gps.start();
@@ -197,10 +224,10 @@ export function App() {
     }
     const rec = toRecord(state.session);
     addRecord(APP, state.hike.id, rec);
-    clearStoredSession(APP, state.hike.id);
+    // Clear before stopping: endTracking saves, and it must find nothing.
+    hike.clearSession();
     gps.stop();
     hike.endTracking();
-    hike.clearSession();
     hike.setPreview(0);
     show(
       `Saved: ${fmt.km(rec.dist)} in ${fmt.dur(rec.elapsed)} (${fmt.dur(rec.moving)} moving)`,
@@ -211,10 +238,9 @@ export function App() {
   const resetSession = useCallback(() => {
     if (!state.hike) return;
     if (!confirm("Clear this hike's recorded track and timers?")) return;
-    gps.stop();
-    clearStoredSession(APP, state.hike.id);
-    hike.endTracking();
     hike.clearSession();
+    gps.stop();
+    hike.endTracking();
     hike.setPreview(0);
     show("Session cleared");
   }, [state.hike, gps, hike, show]);
@@ -281,24 +307,20 @@ export function App() {
           {state.hike?.name ?? "Picos Hikes"}
         </h1>
 
-        <button
-          className={gps.tracking ? "on" : gps.status === "starting" ? "busy" : ""}
-          onClick={toggleGps}
-          title="Track my position"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
-            <circle cx="12" cy="12" r="3" />
-            <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
-            <circle cx="12" cy="12" r="8" />
-          </svg>
-          <span>GPS</span>
-        </button>
-
         <div className="menu">
           <button onClick={(e) => { e.stopPropagation(); setMenuOpen((o) => !o); }} title="More">
             ⋯
           </button>
           <div className={`menu-list ${menuOpen ? "open" : ""}`}>
+            <button onClick={() => { toggleGps(); setMenuOpen(false); }}>
+              {gps.tracking ? "Stop GPS" : "Start GPS"}
+              <small>
+                {gps.tracking
+                  ? "Tracking now — stops the watch and the recording"
+                  : "Begins tracking and recording this walk"}
+              </small>
+            </button>
+            <hr />
             <button onClick={() => { setPanel("library"); setMenuOpen(false); }}>
               My hikes<small>Choose, import, prepare for offline</small>
             </button>

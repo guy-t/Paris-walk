@@ -29,8 +29,14 @@ export interface MapProvider {
   /** Tile URL template with {z}/{x}/{y}. */
   url: string;
   attribution: string;
+  /**
+   * Furthest the map may be zoomed. Set well past `maxNativeZoom` on purpose:
+   * beyond the native level Leaflet upscales, which is soft but still worth
+   * having — at 1:25,000 the contours run out long before the usefulness of
+   * seeing exactly where you are standing relative to them does.
+   */
   maxZoom: number;
-  /** Highest zoom the server actually has tiles for; Leaflet upscales beyond. */
+  /** Highest zoom with genuinely new detail. Past this, tiles are upscaled. */
   maxNativeZoom: number;
   /**
    * Roughly where it has coverage. Omitted means worldwide.
@@ -75,7 +81,7 @@ export const MAP_PROVIDERS: MapProvider[] = [
     url: "https://a.tile.opentopomap.org/{z}/{x}/{y}.png",
     attribution:
       'Map: <a href="https://opentopomap.org">OpenTopoMap</a> (CC-BY-SA) · data © OpenStreetMap',
-    maxZoom: 17,
+    maxZoom: 19,
     maxNativeZoom: 16,
     tileKB: 22,
   },
@@ -92,7 +98,9 @@ export const MAP_PROVIDERS: MapProvider[] = [
       "&Format=image/jpeg&TileMatrix={z}&TileCol={x}&TileRow={y}",
     attribution:
       'Map: <a href="https://www.ign.es">IGN España</a> (CC BY 4.0) · Mapa Topográfico Nacional',
-    maxZoom: 18,
+    // Detail runs out around 16-17 — beyond that the server upscales the
+    // scanned 1:25,000 sheet, so tiles keep arriving but stop saying more.
+    maxZoom: 20,
     maxNativeZoom: 17,
     bounds: SPAIN,
     tileKB: 26,
@@ -109,10 +117,40 @@ export const MAP_PROVIDERS: MapProvider[] = [
       "&LAYER=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2&STYLE=normal&TILEMATRIXSET=PM" +
       "&TILEMATRIX={z}&TILECOL={x}&TILEROW={y}&FORMAT=image/png",
     attribution: 'Map: <a href="https://www.ign.fr">IGN France</a> · Géoplateforme',
-    maxZoom: 19,
+    maxZoom: 20,
     maxNativeZoom: 18,
     bounds: FRANCE,
     tileKB: 60,
+  },
+  {
+    id: "pnoa-es",
+    name: "Spain aerial (PNOA)",
+    note: "Real detail when you zoom right in — useful for finding the path on the ground.",
+    // Orthophotography at 0.25-0.5 m/pixel, so unlike the scanned topo sheet
+    // this keeps resolving detail at the highest zooms. Same open licence.
+    url:
+      "https://www.ign.es/wmts/pnoa-ma?layer=OI.OrthoimageCoverage&style=default" +
+      "&tilematrixset=GoogleMapsCompatible&Service=WMTS&Request=GetTile&Version=1.0.0" +
+      "&Format=image/jpeg&TileMatrix={z}&TileCol={x}&TileRow={y}",
+    attribution: 'Imagery: <a href="https://www.ign.es">IGN España</a> · PNOA (CC BY 4.0)',
+    maxZoom: 20,
+    maxNativeZoom: 20,
+    bounds: SPAIN,
+    tileKB: 30,
+  },
+  {
+    id: "ortho-fr",
+    name: "France aerial (IGN)",
+    note: "French orthophotography, for when the map is not enough.",
+    url:
+      "https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0" +
+      "&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&TILEMATRIXSET=PM" +
+      "&TILEMATRIX={z}&TILECOL={x}&TILEROW={y}&FORMAT=image/jpeg",
+    attribution: 'Imagery: <a href="https://www.ign.fr">IGN France</a> · Géoplateforme',
+    maxZoom: 20,
+    maxNativeZoom: 19,
+    bounds: FRANCE,
+    tileKB: 35,
   },
   {
     id: "osm",
