@@ -53,10 +53,12 @@ jobs:
           cp -r tracks site/tracks
           # The ported apps, published alongside at /next/ so both can be
           # compared on the same phone.
+          test -f apps/web/dist/hike.html  # never publish an empty build
           mkdir -p site/next
           cp -r apps/web/dist/. site/next/
           # Static artifact: no Jekyll processing.
           touch site/.nojekyll
+          find site -type f | sort
 
       - uses: actions/upload-pages-artifact@v3
         with:

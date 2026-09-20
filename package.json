@@ -10,7 +10,7 @@
     "typecheck": "tsc --build",
     "test": "vitest run",
     "test:watch": "vitest",
-    "build": "pnpm -r --filter \"./apps/*\" build",
+    "build": "pnpm --filter @slownav/web build",
     "dev": "pnpm --filter @slownav/hike dev"
   },
   "devDependencies": {
