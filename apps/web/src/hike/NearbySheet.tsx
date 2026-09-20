@@ -14,12 +14,14 @@ import { useMemo, useState } from "react";
 import type { Sight, SightGroup } from "./sights.js";
 import type { SightsStatus } from "./useHike.js";
 import { WeatherPanel, type WeatherPanelProps } from "./WeatherPanel.js";
+import { NotesPanel, type NotesPanelProps } from "./NotesPanel.js";
 
-export type NearbyTab = "nearby" | "ahead" | "weather" | "water" | "sights" | "food";
+export type NearbyTab = "nearby" | "ahead" | "notes" | "weather" | "water" | "sights" | "food";
 
 const TABS: SheetTab[] = [
   { id: "nearby", label: "Nearby" },
   { id: "ahead", label: "Ahead" },
+  { id: "notes", label: "Route notes" },
   { id: "weather", label: "Weather" },
   { id: "water", label: "Water & shelter" },
   { id: "sights", label: "Sights" },
@@ -60,6 +62,8 @@ export interface NearbySheetProps {
   onExpand: (id: string) => void;
   /** Everything the weather tab shows. */
   weather: WeatherPanelProps;
+  /** Everything the route notes tab shows. */
+  notes: NotesPanelProps;
 }
 
 export function NearbySheet({
@@ -76,6 +80,7 @@ export function NearbySheet({
   expandedIds,
   onExpand,
   weather,
+  notes,
 }: NearbySheetProps) {
   const [search] = useState("");
 
@@ -138,6 +143,8 @@ export function NearbySheet({
   let body: React.ReactNode;
   if (tab === "weather") {
     body = <WeatherPanel {...weather} />;
+  } else if (tab === "notes") {
+    body = <NotesPanel {...notes} />;
   } else if (!sights) {
     body = (
       <div className="sheet-empty">
@@ -222,8 +229,14 @@ export function NearbySheet({
 
   return (
     <Sheet
-      title={tab === "weather" ? "Weather along the route" : title}
-      count={tab === "weather" ? undefined : sights ? list.length : undefined}
+      title={
+        tab === "weather"
+          ? "Weather along the route"
+          : tab === "notes"
+            ? notes.notes?.name || "Route notes"
+            : title
+      }
+      count={tab === "weather" || tab === "notes" ? undefined : sights ? list.length : undefined}
       open={open}
       onToggle={onToggle}
       tabs={TABS}

@@ -20,9 +20,9 @@ this locally" — if it cannot happen in CI, it needs saying out loud.
 ```
 packages/core     geometry, map-matching, the GPS tracker, sessions, GPX,
                   sun times, Overpass and Wikipedia clients, offline tiles,
-                  the forecast client and the barometric maths.
+                  the forecast client, the barometric maths and the route-notes parser.
                   No React, no Leaflet, no DOM beyond the browser APIs that
-                  are the point. 245 unit tests.
+                  are the point. 275 unit tests.
 packages/ui       MapView, ElevationProfile, Sheet, StatTile, Toast, and the
                   geolocation / wake-lock / service-worker hooks.
 apps/web          one Vite app, one HTML entry per guide, two build targets.
@@ -141,6 +141,24 @@ an uncalibrated pressure altitude as if it were a position. The sensor is
 Android-only (no shipping web API exposes a barometer) and absent on many
 phones, so everything degrades to nothing through `barometerAvailable()`.
 
+**Route notes never enter this repository.** They are the walking company's
+words — a personal copy of a copyrighted document, with the host's mobile
+number in it. They are imported from a file on the phone, kept in that
+device's storage under `hike:notes:<id>`, and forgettable from the tab.
+Every test is written against notes invented for the purpose. Do not commit
+a transcription, paste one into an issue, or put one in a PR body.
+
+**A GPX handed out with route notes is not always one clean line.** The
+day-1 file for Potes to Cosgaya is 34.6 km for a 14.5 km walk: it holds the
+harder option and the main route end to end in one track, the harder option
+first. So `placeSteps` fits each variant to *its own* anchors rather than
+assuming the notes start where the track starts — that assumption put the
+second instruction eleven kilometres out. The anchors are the bracketed
+waypoints, whose names match the GPX's own (`[1]`, `[A]`,
+`[Hotel del Oso]`); everything between them is interpolated, which rescales
+the printed kilometres onto measured ones. Measured against waypoints not
+used as anchors, the fit is within about 150 m.
+
 **Always send `Cache-Control: no-cache` when checking the live site.** The
 Pages CDN caches 404s, so a path a deploy just added keeps answering 404.
 
@@ -149,7 +167,7 @@ Pages CDN caches 404s, so a path a deploy just added keeps answering 404.
 ```bash
 pnpm install
 pnpm typecheck          # tsc --build across all projects
-pnpm test               # vitest, 245 tests
+pnpm test               # vitest, 275 tests
 pnpm build              # web build for Pages
 pnpm --filter @slownav/web build:native   # payload for the APK
 pnpm --filter @slownav/web dev            # local dev server

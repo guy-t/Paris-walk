@@ -10,6 +10,7 @@
 export * from "./geo.js";
 export * from "./match.js";
 export * from "./track.js";
+export * from "./notes.js";
 export * from "./pressure.js";
 export * from "./weather.js";
 export * from "./sun.js";
