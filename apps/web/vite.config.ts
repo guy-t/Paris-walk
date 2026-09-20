@@ -4,77 +4,99 @@ import { defineConfig } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 
 /**
- * One Vite app, three HTML entries — hike.html, canalmap.html and
- * pariswalk.html — rather than three separate builds.
+ * One Vite app, several HTML entries — the launcher, then hike.html and
+ * eventually canalmap.html and pariswalk.html — rather than separate builds.
  *
  * That keeps every original URL working exactly as it did, while the shared
- * core, Leaflet and React end up in chunks all three entries reference. A
+ * core, Leaflet and React end up in chunks all the entries reference. A
  * walker who has opened one app has already downloaded most of the next.
  *
- * `base` matches the GitHub Pages project path. The site is served from
- * /Paris-walk/, not from the domain root.
+ * Two targets, one source:
+ *
+ *   default      the GitHub Pages site, served from /Paris-walk/next/
+ *   --mode native  the Capacitor shell, where the app is loaded from the
+ *                  device and so needs relative URLs, no service worker and
+ *                  no sourcemaps
+ *
+ * The mode is used rather than an environment variable because npm scripts
+ * run through cmd.exe on Windows, where `FOO=1 vite build` is a syntax error.
  */
-export default defineConfig({
-  // The ported apps are published under /next/ while the original single-file
-  // versions keep serving the real URLs. Once a port has been walked with and
-  // trusted, SLOWNAV_BASE becomes "/Paris-walk/" and it takes over the old
-  // path; nothing else about the build changes.
-  base: process.env.SLOWNAV_BASE ?? "/Paris-walk/next/",
-  plugins: [
-    react(),
-    VitePWA({
-      // The same filename the original service worker used, so existing
-      // installs update their registration in place instead of leaving a
-      // stale worker serving a cached app forever.
-      filename: "sw.js",
-      registerType: "prompt", // the app shows "a new version is ready"
-      injectRegister: null, // registered by useServiceWorker, not by the plugin
-      // Serve a real worker in dev too, so the offline behaviour and the
-      // update prompt can be exercised without a production build.
-      devOptions: { enabled: true, type: "module" },
-      workbox: {
-        globPatterns: ["**/*.{js,css,html,svg,png,woff2}"],
-        // Map tiles are cached by the app's own corridor download, which is
-        // bounded to a route. Nothing here should try to cache the whole map.
-        runtimeCaching: [
-          {
-            urlPattern: /^https:\/\/[abc]?\.?tile\.opentopomap\.org\/.*/i,
-            handler: "CacheFirst",
-            options: {
-              // Shared with precacheTiles in @slownav/core: a downloaded hike
-              // survives an app update.
-              cacheName: "slownav-tiles",
-              expiration: { maxEntries: 20000, maxAgeSeconds: 60 * 60 * 24 * 180 },
-              cacheableResponse: { statuses: [0, 200] },
-            },
-          },
-        ],
+export default defineConfig(({ mode }) => {
+  const native = mode === "native";
+
+  return {
+    // Relative in the shell so assets resolve from the device. Shipping the
+    // Pages base inside the APK would point every asset at a URL the phone
+    // may have no signal to reach.
+    base: native ? "./" : (process.env.SLOWNAV_BASE ?? "/Paris-walk/next/"),
+
+    plugins: [
+      react(),
+
+      // The shell has every asset on the device already, so it neither
+      // registers a worker nor needs one shipped inside the APK.
+      ...(native
+        ? []
+        : [
+            VitePWA({
+              filename: "sw.js",
+              registerType: "prompt", // the app shows "a new version is ready"
+              injectRegister: null, // registered by useServiceWorker, not the plugin
+              // Serve a real worker in dev too, so the offline behaviour and
+              // the update prompt can be exercised without a production build.
+              devOptions: { enabled: true, type: "module" },
+              workbox: {
+                globPatterns: ["**/*.{js,css,html,svg,png,woff2}"],
+                // Map tiles are cached by the app's own corridor download,
+                // which is bounded to one route. Nothing here should try to
+                // cache the whole map.
+                runtimeCaching: [
+                  {
+                    urlPattern: /^https:\/\/[abc]?\.?tile\.opentopomap\.org\/.*/i,
+                    handler: "CacheFirst",
+                    options: {
+                      // Shared with precacheTiles in @slownav/core, so a
+                      // downloaded hike survives an app update.
+                      cacheName: "slownav-tiles",
+                      expiration: {
+                        maxEntries: 20000,
+                        maxAgeSeconds: 60 * 60 * 24 * 180,
+                      },
+                      cacheableResponse: { statuses: [0, 200] },
+                    },
+                  },
+                ],
+              },
+              manifest: {
+                name: "Slow Navigator",
+                short_name: "Slow Nav",
+                description:
+                  "Walking, hiking and boating companions that keep working offline.",
+                start_url: "./index.html",
+                scope: "./",
+                display: "standalone",
+                background_color: "#f4f5f2",
+                theme_color: "#2f4f3e",
+                orientation: "portrait",
+              },
+            }),
+          ]),
+    ],
+
+    build: {
+      outDir: native ? "dist-native" : "dist",
+      rollupOptions: {
+        input: {
+          // The launcher, which is also what the native shell opens into.
+          index: resolve(import.meta.dirname, "index.html"),
+          hike: resolve(import.meta.dirname, "hike.html"),
+        },
       },
-      manifest: {
-        name: "Slow Navigator",
-        short_name: "Slow Nav",
-        description: "Walking, hiking and boating companions that keep working offline.",
-        start_url: "./hike.html",
-        scope: "./",
-        display: "standalone",
-        background_color: "#f4f5f2",
-        theme_color: "#2f4f3e",
-        orientation: "portrait",
-      },
-    }),
-  ],
-  build: {
-    rollupOptions: {
-      input: {
-        // The launcher, which is also what the native shell opens into.
-        index: resolve(import.meta.dirname, "index.html"),
-        hike: resolve(import.meta.dirname, "hike.html"),
-      },
+      assetsDir: "assets",
+      target: "es2022",
+      // Useful on the web, two megabytes of dead weight in an APK that
+      // nothing on the device will ever read.
+      sourcemap: !native,
     },
-    // Named per entry so three apps can share one output directory without
-    // overwriting one another's assets.
-    assetsDir: "assets",
-    target: "es2022",
-    sourcemap: true,
-  },
+  };
 });

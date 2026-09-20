@@ -8,7 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --build",
-    "build:native": "vite build --base ./ --outDir dist-native"
+    "build:native": "vite build --mode native"
   },
   "dependencies": {
     "@capacitor/app": "^8.1.1",
