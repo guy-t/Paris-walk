@@ -259,3 +259,24 @@ body.map-full .dash { position: absolute; top: max(8px, env(safe-area-inset-top)
 .wx-extra { font-size: 12px; color: var(--muted-strong); margin-top: 2px; }
 .wx-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-top: 10px; font-size: 12px; color: var(--muted-strong); }
 .wx-foot button { border: 1px solid var(--line-strong); background: var(--panel); border-radius: 8px; padding: 7px 12px; font-size: 13px; min-height: 36px; }
+
+/* ---------- route notes tab ---------- */
+.note-step { padding: 10px 2px; border-bottom: 1px solid var(--line); }
+.note-step:last-of-type { border-bottom: 0; }
+/* The one being walked: the only thing that matters at a junction. */
+.note-step.current { background: #f0f5f1; border-radius: 10px; padding: 12px 10px; margin: 4px 0; }
+.note-step.unplaced { opacity: .72; }
+.note-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; font-size: 12px; color: var(--muted-strong); }
+.note-ref { display: inline-block; min-width: 20px; padding: 1px 6px; margin-right: 6px; border-radius: 6px; background: var(--accent); color: #f3f7f4; font-size: 11px; }
+.note-time { font-variant-numeric: tabular-nums; }
+.note-text { font-size: 15px; line-height: 1.4; margin-top: 4px; }
+.note-step.current .note-text { font-size: 16px; font-weight: 500; }
+.note-aside { font-size: 13px; line-height: 1.4; color: var(--muted-strong); margin-top: 6px; padding-left: 10px; border-left: 2px solid var(--line-strong); }
+.note-aside.warn { color: var(--warn); border-left-color: var(--warn); font-weight: 500; }
+.notes-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-top: 10px; font-size: 12px; color: var(--muted-strong); }
+.notes-foot button { border: 1px solid var(--line-strong); background: var(--panel); border-radius: 8px; padding: 6px 10px; font-size: 12px; min-height: 34px; }
+/* The live instruction on the dashboard, above the map. */
+.cue { display: flex; align-items: center; gap: 10px; margin: 6px 10px 0; padding: 8px 10px; border-radius: 10px; background: #f0f5f1; font-size: 14px; }
+.cue .cue-text { flex: 1; min-width: 0; line-height: 1.35; }
+.cue .cue-dist { font-variant-numeric: tabular-nums; color: var(--muted-strong); font-size: 12px; white-space: nowrap; }
+.cue.warn { background: #fef2f2; color: var(--warn); font-weight: 600; }

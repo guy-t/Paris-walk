@@ -14,6 +14,7 @@ import {
   positionAt,
   project,
   records,
+  stepAt,
   store,
   storageReport,
   suggestProvider,
@@ -53,6 +54,7 @@ import { onOpenedFiles } from "../shared/openedFiles.js";
 import { importGpxFiles, importMessage } from "./importGpx.js";
 import { useHike } from "./useHike.js";
 import { useWeather } from "./useWeather.js";
+import { importNotes, clearNotes, loadNotes, placeNotes, type StoredNotes } from "./notes.js";
 import "./hike.css";
 
 /** Keeps elapsed time and the moving average ticking between GPS fixes. */
@@ -317,6 +319,24 @@ export function App() {
     return out;
   }, [state.waypoints, state.sights, settings.showSights]);
 
+  // ---- route notes: the walking company's own instructions ----
+  //
+  // Imported from a file and kept on this device. They are placed on the
+  // line using the waypoints the app has already projected, so an
+  // instruction that names one sits exactly on it.
+  const [notes, setNotes] = useState<StoredNotes | null>(null);
+  const notesInput = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    setNotes(state.hike ? loadNotes(state.hike.id) : null);
+  }, [state.hike]);
+
+  const noteSteps = useMemo(
+    () => placeNotes(notes, state.waypoints, state.track?.length ?? 0),
+    [notes, state.waypoints, state.track],
+  );
+  const cue = useMemo(() => stepAt(noteSteps, state.progress), [noteSteps, state.progress]);
+  const currentIndex = cue.current ? noteSteps.indexOf(cue.current) : -1;
+
   // The pace the ETA has settled on, so the forecast and the arrival time on
   // the dashboard never disagree about when the walker reaches the col.
   const paceFactor =
@@ -408,6 +428,16 @@ export function App() {
           </div>
         </div>
       </header>
+
+      {cue.current && (
+        <div className={`cue${cue.current.notes.some((n) => n.warning) ? " warn" : ""}`}>
+          {cue.current.ref ? <strong className="note-ref">{cue.current.ref}</strong> : null}
+          <span className="cue-text">{cue.current.text}</span>
+          {cue.next?.prog != null && (
+            <span className="cue-dist">next {fmt.dist(cue.next.prog - state.progress)}</span>
+          )}
+        </div>
+      )}
 
       {panel === "library" && (
         <LibraryPanel
@@ -581,9 +611,42 @@ export function App() {
           fmt,
           onRefresh: weather.refresh,
         }}
+        notes={{
+          notes,
+          steps: noteSteps,
+          progress: state.progress,
+          currentIndex,
+          fmt,
+          onImport: () => notesInput.current?.click(),
+          onForget: () => {
+            if (!state.hike) return;
+            clearNotes(state.hike.id);
+            setNotes(null);
+            show("Route notes removed from this phone.");
+          },
+        }}
         onShowOnMap={(s) => {
           setFollow(false);
           setFlyTo({ pos: [s.lat, s.lon], nonce: Date.now() });
+        }}
+      />
+
+      {/* Unfiltered, for the same reason the GPX picker is: Android greys
+          out a file whose type it cannot agree on. */}
+      <input
+        ref={notesInput}
+        type="file"
+        hidden
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (!file || !state.hike) return;
+          const hikeId = state.hike.id;
+          void file.text().then((text) => {
+            const result = importNotes(hikeId, text);
+            show(result.message);
+            if (result.ok) setNotes(result.notes);
+          });
         }}
       />
 
