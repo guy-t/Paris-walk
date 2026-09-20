@@ -1,0 +1,11 @@
+node_modules/
+dist/
+site/
+.vite/
+*.local
+.DS_Store
+# Python test environment
+.venv/
+__pycache__/
+.pytest_cache/
+test-results/
