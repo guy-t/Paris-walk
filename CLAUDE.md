@@ -19,9 +19,10 @@ this locally" — if it cannot happen in CI, it needs saying out loud.
 
 ```
 packages/core     geometry, map-matching, the GPS tracker, sessions, GPX,
-                  sun times, Overpass and Wikipedia clients, offline tiles.
+                  sun times, Overpass and Wikipedia clients, offline tiles,
+                  the forecast client and the barometric maths.
                   No React, no Leaflet, no DOM beyond the browser APIs that
-                  are the point. 185 unit tests.
+                  are the point. 245 unit tests.
 packages/ui       MapView, ElevationProfile, Sheet, StatTile, Toast, and the
                   geolocation / wake-lock / service-worker hooks.
 apps/web          one Vite app, one HTML entry per guide, two build targets.
@@ -120,6 +121,26 @@ walker will look for must check it. Menu → Storage & saved data reports what
 is stored and whether a 64 kB write actually succeeds, which is the only
 honest way to ask: localStorage never states its limit.
 
+**The forecast is a contract with someone else's service.** Open-Meteo is
+used because it takes an elevation per point, answers for several points in
+one request, needs no key and permits caching — the same entry requirement
+the map providers meet. The field names it is asked for live in
+`HOURLY_FIELDS`, and the unit tests prove the *parser* against a fixture,
+which proves nothing about whether the service still sends those fields. So
+`weather.contract.test.ts` calls the live API, gated behind
+`WEATHER_CONTRACT=1` and run by `weather.yml` on a schedule and on forecast
+pull requests. It is deliberately not part of `deploy.yml`: a walk must
+never be blocked because a weather service is having an afternoon.
+
+**Barometric altitude is only as good as its reference.** Pressure gives a
+beautifully smooth height *change*, which GPS cannot; absolute height needs
+a sea-level pressure, and that moves with the weather — 30 hPa between a
+deep low and a strong high is 250 m of error. The forecast's `pressure_msl`
+is used when there is one and the reading says which it used. Never present
+an uncalibrated pressure altitude as if it were a position. The sensor is
+Android-only (no shipping web API exposes a barometer) and absent on many
+phones, so everything degrades to nothing through `barometerAvailable()`.
+
 **Always send `Cache-Control: no-cache` when checking the live site.** The
 Pages CDN caches 404s, so a path a deploy just added keeps answering 404.
 
@@ -128,7 +149,7 @@ Pages CDN caches 404s, so a path a deploy just added keeps answering 404.
 ```bash
 pnpm install
 pnpm typecheck          # tsc --build across all projects
-pnpm test               # vitest, 185 tests
+pnpm test               # vitest, 245 tests
 pnpm build              # web build for Pages
 pnpm --filter @slownav/web build:native   # payload for the APK
 pnpm --filter @slownav/web dev            # local dev server
@@ -144,6 +165,7 @@ on PATH.
 | `deploy.yml`  | push to `main`, and PRs  | typecheck, test, build; publishes to Pages only on `main` |
 | `android.yml` | push to `main`           | builds an APK, replaces the `android-latest` release |
 | `ios.yml`     | push to `main`           | compiles unsigned on macOS — a rot check only  |
+| `weather.yml` | forecast PRs, weekly     | calls the live forecast API and checks the fields still exist |
 
 A pull request runs `deploy.yml`'s gates and publishes nothing: the
 publishing steps are skipped individually rather than the job being split, so
@@ -172,9 +194,12 @@ done by hand once — the settings API needs repo-admin rights the default
 ## Not done yet
 
 - Canal and walk ports.
-- Native sensors: barometer (steady climb, unlike GPS altitude), step counter,
-  background location. The seam is `PositionWatcher` in `@slownav/ui` — swap
-  the watcher, change nothing else.
+- Native sensors: step counter and background location. The seam is
+  `PositionWatcher` in `@slownav/ui` — swap the watcher, change nothing else.
+  The barometer is done: `SlowNavBarometer` in `MainActivity`, read through
+  `shared/barometer.ts`.
+- The forecast is Android- and browser-wide, but the barometer half of the
+  weather tab only appears where the sensor does.
 - Play Store internal track, for background APK updates. Needs a $25 account,
   an upload key in secrets, and one first release created by hand in the Play
   Console.

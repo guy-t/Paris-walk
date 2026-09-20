@@ -13,12 +13,14 @@ import { haversine, type Formatter, type LatLon } from "@slownav/core";
 import { useMemo, useState } from "react";
 import type { Sight, SightGroup } from "./sights.js";
 import type { SightsStatus } from "./useHike.js";
+import { WeatherPanel, type WeatherPanelProps } from "./WeatherPanel.js";
 
-export type NearbyTab = "nearby" | "ahead" | "water" | "sights" | "food";
+export type NearbyTab = "nearby" | "ahead" | "weather" | "water" | "sights" | "food";
 
 const TABS: SheetTab[] = [
   { id: "nearby", label: "Nearby" },
   { id: "ahead", label: "Ahead" },
+  { id: "weather", label: "Weather" },
   { id: "water", label: "Water & shelter" },
   { id: "sights", label: "Sights" },
   { id: "food", label: "Food & services" },
@@ -56,6 +58,8 @@ export interface NearbySheetProps {
   /** Sights to render expanded — used when one is opened from the map. */
   expandedIds: ReadonlySet<string>;
   onExpand: (id: string) => void;
+  /** Everything the weather tab shows. */
+  weather: WeatherPanelProps;
 }
 
 export function NearbySheet({
@@ -71,6 +75,7 @@ export function NearbySheet({
   onShowOnMap,
   expandedIds,
   onExpand,
+  weather,
 }: NearbySheetProps) {
   const [search] = useState("");
 
@@ -131,7 +136,9 @@ export function NearbySheet({
   };
 
   let body: React.ReactNode;
-  if (!sights) {
+  if (tab === "weather") {
+    body = <WeatherPanel {...weather} />;
+  } else if (!sights) {
     body = (
       <div className="sheet-empty">
         {status === "loading"
@@ -215,8 +222,8 @@ export function NearbySheet({
 
   return (
     <Sheet
-      title={title}
-      count={sights ? list.length : undefined}
+      title={tab === "weather" ? "Weather along the route" : title}
+      count={tab === "weather" ? undefined : sights ? list.length : undefined}
       open={open}
       onToggle={onToggle}
       tabs={TABS}

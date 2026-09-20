@@ -238,3 +238,24 @@ body.map-full .dash { position: absolute; top: max(8px, env(safe-area-inset-top)
 /* The sheet is a <section> now, so it needs the flex behaviour the custom
    element got from its own rule. */
 .sheet { display: flex; }
+
+/* ---------- weather tab ---------- */
+.wx-baro { background: var(--bg); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; }
+.wx-baro-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; font-size: 16px; }
+.wx-baro-head .wx-alt { font-variant-numeric: tabular-nums; }
+.wx-baro-head .wx-alt small { color: var(--muted-strong); font-size: 11px; }
+.wx-trend { margin-top: 4px; font-size: 13px; color: var(--muted-strong); }
+.wx-row { display: flex; gap: 12px; padding: 10px 2px; border-bottom: 1px solid var(--line); }
+.wx-row:last-of-type { border-bottom: 0; }
+.wx-when { min-width: 58px; text-align: right; font-variant-numeric: tabular-nums; }
+.wx-when strong { display: block; font-size: 15px; }
+.wx-when small { color: var(--muted-strong); font-size: 11px; }
+.wx-what { flex: 1; min-width: 0; }
+.wx-where { font-size: 14px; font-weight: 600; }
+.wx-where small { font-weight: 400; color: var(--muted-strong); }
+.wx-summary { font-size: 14px; margin-top: 2px; }
+/* Snow at height is the one thing on this screen that changes a decision. */
+.wx-summary.snow { color: var(--warn); font-weight: 600; }
+.wx-extra { font-size: 12px; color: var(--muted-strong); margin-top: 2px; }
+.wx-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-top: 10px; font-size: 12px; color: var(--muted-strong); }
+.wx-foot button { border: 1px solid var(--line-strong); background: var(--panel); border-radius: 8px; padding: 7px 12px; font-size: 13px; min-height: 36px; }
