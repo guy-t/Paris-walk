@@ -21,7 +21,7 @@ this locally" — if it cannot happen in CI, it needs saying out loud.
 packages/core     geometry, map-matching, the GPS tracker, sessions, GPX,
                   sun times, Overpass and Wikipedia clients, offline tiles.
                   No React, no Leaflet, no DOM beyond the browser APIs that
-                  are the point. 155 unit tests.
+                  are the point. 160 unit tests.
 packages/ui       MapView, ElevationProfile, Sheet, StatTile, Toast, and the
                   geolocation / wake-lock / service-worker hooks.
 apps/web          one Vite app, one HTML entry per guide, two build targets.
@@ -105,7 +105,7 @@ Pages CDN caches 404s, so a path a deploy just added keeps answering 404.
 ```bash
 pnpm install
 pnpm typecheck          # tsc --build across all projects
-pnpm test               # vitest, 155 tests
+pnpm test               # vitest, 160 tests
 pnpm build              # web build for Pages
 pnpm --filter @slownav/web build:native   # payload for the APK
 pnpm --filter @slownav/web dev            # local dev server
