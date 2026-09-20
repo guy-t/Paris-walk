@@ -22,12 +22,14 @@ export interface MapMarker {
   id: string;
   lat: number;
   lon: number;
-  /** CSS class for the marker dot, e.g. "peak", "water", "hut". */
+  /** Marker shape, e.g. "peak", "water", "hut". Rendered as `mk-<kind>`. */
   kind: string;
   /** Popup HTML. Callers must escape anything user- or OSM-supplied. */
   popup?: string;
   /** Marker label, for waypoints that show a number or initials. */
   label?: string;
+  /** Icon box in pixels; defaults to 18 with a label, 10 without. */
+  size?: number;
   onClick?: () => void;
 }
 
@@ -227,12 +229,19 @@ export function MapView({
     if (!group) return;
     group.clearLayers();
     for (const m of markers ?? []) {
+      // The icon box matches the dot's drawn size so it stays centred on the
+      // thing it marks; Leaflet anchors from the top-left otherwise.
+      const size = m.size ?? (m.label ? 18 : 10);
       const marker = L.marker([m.lat, m.lon], {
         icon: L.divIcon({
           className: "",
-          html: `<div class="mk ${m.kind}">${m.label ?? ""}</div>`,
-          iconSize: m.label ? [20, 20] : [14, 14],
-          iconAnchor: m.label ? [10, 10] : [7, 7],
+          // Namespaced as mk-<kind>: a bare kind class collides with app styles
+          // that happen to use the same word. ".poi" on a marker was matching
+          // the sheet's list-card rule and inheriting its 12px padding, which
+          // silently tripled the size of every dot on the map.
+          html: `<div class="mk mk-${m.kind}">${m.label ?? ""}</div>`,
+          iconSize: [size, size],
+          iconAnchor: [size / 2, size / 2],
         }),
       });
       if (m.popup) marker.bindPopup(m.popup);

@@ -10,6 +10,7 @@
 import {
   cachedCount,
   corridorTiles,
+  sourceForProvider,
   downloadGPX,
   estimateMB,
   parseGPX,
@@ -21,8 +22,10 @@ import {
   store,
   toGPX,
   type Formatter,
+  type MapProvider,
   type ProcessedTrack,
   type Session,
+  type TileSource,
 } from "@slownav/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { APP, library, type Hike, type HikeSettings } from "./model.js";
@@ -58,6 +61,10 @@ interface OfflineState {
 export interface LibraryPanelProps {
   currentId: string | null;
   settings: HikeSettings;
+  /** The base map in use — offline downloads must match what is displayed. */
+  provider: MapProvider;
+  /** Its API key, if it needs one. */
+  providerKey?: string | null;
   fmt: Formatter;
   onOpen: (id: string) => void;
   onClose: () => void;
@@ -75,6 +82,8 @@ export interface LibraryPanelProps {
 export function LibraryPanel({
   currentId,
   settings,
+  provider,
+  providerKey,
   fmt,
   onOpen,
   onClose,
@@ -98,13 +107,26 @@ export function LibraryPanel({
     [hikes, settings.pace],
   );
 
+  // Tiles are cached by URL, so each provider is counted and downloaded
+  // separately — switching map does not silently claim the new one is
+  // already downloaded because the old one was.
+  const source: TileSource | null = useMemo(
+    () => sourceForProvider(provider, providerKey),
+    [provider, providerKey],
+  );
+
+  const urlsFor = useCallback(
+    (pts: Hike["pts"]) => (source ? corridorTiles(pts, source) : []),
+    [source],
+  );
+
   const refreshOffline = useCallback(
     async (id: string, pts: Hike["pts"]) => {
-      const urls = corridorTiles(pts);
+      const urls = urlsFor(pts);
       const have = await cachedCount(urls);
       setOffline((o) => ({ ...o, [id]: { have, total: urls.length } }));
     },
-    [],
+    [urlsFor],
   );
 
   useEffect(() => {
@@ -125,7 +147,7 @@ export function LibraryPanel({
           setProgressText((p) => ({ ...p, [h.id]: "Looking up sights and articles…" }));
           await onPrepareSights(h, track);
         }
-        const urls = corridorTiles(h.pts);
+        const urls = urlsFor(h.pts);
         const res = await precacheTiles(urls, ({ done, total, failed }) => {
           setProgressText((p) => ({
             ...p,
@@ -149,7 +171,7 @@ export function LibraryPanel({
       }
       setBusy(null);
     },
-    [tracks, onPrepareSights, onToast, refreshOffline],
+    [tracks, onPrepareSights, onToast, refreshOffline, urlsFor],
   );
 
   // "Prepare this hike for offline" from the menu opens the panel and starts
@@ -228,7 +250,7 @@ export function LibraryPanel({
                       ? `Offline maps ready (${off.have} tiles)`
                       : off.have
                         ? `Offline maps ${Math.round((100 * off.have) / off.total)}% (${off.have}/${off.total} tiles)`
-                        : `Not prepared for offline (${off.total} tiles, ≈ ${estimateMB(off.total)} MB)`}
+                        : `Not prepared for offline (${off.total} tiles, ≈ ${estimateMB(off.total, provider.tileKB)} MB)`}
                 </span>
               </div>
 

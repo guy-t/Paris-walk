@@ -3,6 +3,7 @@
  */
 
 import {
+  DEFAULT_PROVIDER_ID,
   hashStr,
   interp,
   positionAt,
@@ -32,7 +33,21 @@ export interface HikeSettings {
   sun: boolean;
   /** Hold the screen awake while tracking. */
   wake: boolean;
+  /** Chosen base map, by provider id. */
+  provider: string;
+  /** Draw sights on the map. Off declutters it without losing the list. */
+  showSights: boolean;
 }
+
+/**
+ * Which base maps this app prefers, best first.
+ *
+ * The hiking app's routes are in the Picos, so the Spanish national survey is
+ * the right default where it reaches — a coordinate cannot be relied on to
+ * say which country's agency to trust near a border, but the app knows what
+ * it is for. An imported GPX from elsewhere falls through to OpenTopoMap.
+ */
+export const PREFERRED_PROVIDERS = ["ign-es", "opentopo"] as const;
 
 export const DEFAULT_SETTINGS: HikeSettings = {
   units: "metric",
@@ -41,6 +56,8 @@ export const DEFAULT_SETTINGS: HikeSettings = {
   vib: true,
   sun: true,
   wake: false,
+  provider: DEFAULT_PROVIDER_ID,
+  showSights: true,
 };
 
 export function loadSettings(): HikeSettings {

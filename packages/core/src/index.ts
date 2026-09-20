@@ -18,5 +18,6 @@ export * from "./storage.js";
 export * from "./overpass.js";
 export * from "./wikipedia.js";
 export * from "./tiles.js";
+export * from "./providers.js";
 export * from "./tracker.js";
 export * from "./session.js";

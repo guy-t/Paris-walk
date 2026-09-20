@@ -4,19 +4,28 @@
  * (how fast you walk) or between hikes (how far off the path is "off").
  */
 
-import { useState } from "react";
+import { providersFor, store, type AnyPoint } from "@slownav/core";
+import { useMemo, useState } from "react";
 import { DEFAULT_SETTINGS, type HikeSettings } from "./model.js";
 
 export interface SettingsPanelProps {
   settings: HikeSettings;
   onSave: (s: HikeSettings) => void;
   onClose: () => void;
+  /** A point on the current route, used to say which maps reach it. */
+  near?: AnyPoint | null;
 }
 
-export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps) {
+export function SettingsPanel({ settings, onSave, onClose, near }: SettingsPanelProps) {
   const [draft, setDraft] = useState<HikeSettings>(settings);
   const set = <K extends keyof HikeSettings>(k: K, v: HikeSettings[K]) =>
     setDraft((d) => ({ ...d, [k]: v }));
+
+  const options = useMemo(() => providersFor(near ?? [43.15, -4.75]), [near]);
+  const chosen = options.find((o) => o.provider.id === draft.provider)?.provider;
+  const [mapKey, setMapKey] = useState(
+    () => store.get<string>("map:key:" + (chosen?.keyName ?? "none")) ?? "",
+  );
 
   return (
     <div className="panel" id="settings">
@@ -28,6 +37,50 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
       </div>
 
       <div className="panel-body set-body">
+        <label>
+          Base map
+          <select value={draft.provider} onChange={(e) => set("provider", e.target.value)}>
+            {options.map(({ provider, available }) => (
+              <option key={provider.id} value={provider.id} disabled={!available}>
+                {provider.name}
+                {available ? "" : " — not this area"}
+              </option>
+            ))}
+          </select>
+        </label>
+        <p className="hint">{chosen?.note}</p>
+
+        {chosen?.keyName && (
+          <>
+            <label>
+              {chosen.name} key
+              <input
+                type="text"
+                value={mapKey}
+                placeholder="paste your API key"
+                onChange={(e) => setMapKey(e.target.value)}
+              />
+            </label>
+            <p className="hint">
+              Kept on this device only, never sent anywhere but the map server, and never
+              stored in the project.
+            </p>
+          </>
+        )}
+
+        <label>
+          Show sights on the map
+          <input
+            type="checkbox"
+            checked={draft.showSights}
+            onChange={(e) => set("showSights", e.target.checked)}
+          />
+        </label>
+        <p className="hint">
+          Turning these off leaves the list in the sheet untouched — it only stops the dots
+          covering the map.
+        </p>
+
         <label>
           Units
           <select
@@ -83,7 +136,15 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
       </div>
 
       <div className="panel-foot">
-        <button className="primary" onClick={() => onSave(draft)}>
+        <button
+          className="primary"
+          onClick={() => {
+            // The key belongs to the device, not to the settings object that
+            // gets written to storage alongside everything else.
+            if (chosen?.keyName) store.set("map:key:" + chosen.keyName, mapKey.trim());
+            onSave(draft);
+          }}
+        >
           Save
         </button>
         <button onClick={onClose}>Cancel</button>

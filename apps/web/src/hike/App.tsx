@@ -11,10 +11,13 @@ import {
   clearSession as clearStoredSession,
   createFormatter,
   downloadGPX,
+  getProvider,
   positionAt,
   project,
   records,
   store,
+  suggestProvider,
+  tileUrl as providerTileUrl,
   toGPX,
   toRecord,
   type LatLon,
@@ -35,15 +38,18 @@ import { Dashboard } from "./Dashboard.js";
 import { LibraryPanel } from "./LibraryPanel.js";
 import { NearbySheet, tabForSight, type NearbyTab } from "./NearbySheet.js";
 import { SettingsPanel } from "./SettingsPanel.js";
-import { APP, library, loadSettings, saveSettings, type HikeSettings } from "./model.js";
+import {
+  APP,
+  library,
+  loadSettings,
+  PREFERRED_PROVIDERS,
+  saveSettings,
+  type HikeSettings,
+} from "./model.js";
 import { positionWatcher } from "../shared/geolocation.js";
 import { wantsServiceWorker } from "../shared/platform.js";
 import { useHike } from "./useHike.js";
 import "./hike.css";
-
-const TILE_URL = "https://a.tile.opentopomap.org/{z}/{x}/{y}.png";
-const TILE_ATTRIBUTION =
-  'Map: <a href="https://opentopomap.org">OpenTopoMap</a> (CC-BY-SA) · data © OpenStreetMap';
 
 /** Keeps elapsed time and the moving average ticking between GPS fixes. */
 const TICK_MS = 5000;
@@ -55,6 +61,25 @@ export function App() {
   const fmt = useMemo(() => createFormatter(settings.units), [settings.units]);
   const hike = useHike(settings);
   const { state } = hike;
+
+  // Which base map, and the URL to actually use. A provider needing a key the
+  // walker has not supplied would render a grid of broken tiles, so it falls
+  // back rather than showing that.
+  const start = state.track?.pts[0] ?? null;
+  const provider = useMemo(() => {
+    const chosen = getProvider(settings.provider);
+    const key = chosen.keyName ? store.get<string>(`map:key:${chosen.keyName}`) : null;
+    // A provider whose key is missing has no usable URL at all; anything else
+    // the walker picked is honoured, including one whose coverage box does not
+    // quite reach — the boxes are approximate and they may know better.
+    if (providerTileUrl(chosen, key)) return chosen;
+    return suggestProvider(start ?? [43.15, -4.75], PREFERRED_PROVIDERS);
+  }, [settings.provider, start]);
+
+  const tiles = useMemo(() => {
+    const key = provider.keyName ? store.get<string>(`map:key:${provider.keyName}`) : null;
+    return providerTileUrl(provider, key);
+  }, [provider]);
 
   const [panel, setPanel] = useState<Panel>("none");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -224,6 +249,7 @@ export function App() {
       label: /^\d+$/.test(w.name) ? w.name : w.name.slice(0, 2) || String(i + 1),
       popup: `<b>${escapeHtml(w.name)}</b>${w.desc ? `<br>${escapeHtml(w.desc)}` : ""}`,
     }));
+    if (!settings.showSights) return out;
     for (const s of state.sights ?? []) {
       // Villages are context, not destinations; a pin for each would bury the map.
       if (s.group === "place") continue;
@@ -241,7 +267,7 @@ export function App() {
       });
     }
     return out;
-  }, [state.waypoints, state.sights]);
+  }, [state.waypoints, state.sights, settings.showSights]);
 
   const trail = useMemo(
     () => state.session?.trail.map((p) => [p[0], p[1]] as LatLon),
@@ -325,6 +351,8 @@ export function App() {
         <LibraryPanel
           currentId={state.hike?.id ?? null}
           settings={settings}
+          provider={provider}
+          providerKey={provider.keyName ? store.get<string>(`map:key:${provider.keyName}`) : null}
           fmt={fmt}
           onOpen={openHike}
           onClose={() => setPanel("none")}
@@ -340,6 +368,7 @@ export function App() {
       {panel === "settings" && (
         <SettingsPanel
           settings={settings}
+          near={start}
           onClose={() => setPanel("none")}
           onSave={(next) => {
             setSettings(next);
@@ -374,8 +403,10 @@ export function App() {
           markers={markers}
           position={state.pos}
           accuracy={state.mode === "gps" ? state.accuracy : null}
-          tileUrl={TILE_URL}
-          tileAttribution={TILE_ATTRIBUTION}
+          tileUrl={tiles ?? getProvider("opentopo").url}
+          tileAttribution={provider.attribution}
+          maxZoom={provider.maxZoom}
+          maxNativeZoom={provider.maxNativeZoom}
           imperialScale={settings.units === "imperial"}
           follow={follow}
           onUserPan={() => setFollow(false)}
@@ -419,6 +450,30 @@ export function App() {
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
               <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+            </svg>
+          </button>
+          <button
+            className={`fab ${settings.showSights ? "on" : ""}`}
+            title={settings.showSights ? "Hide sights" : "Show sights"}
+            aria-pressed={settings.showSights}
+            onClick={() => {
+              const next = { ...settings, showSights: !settings.showSights };
+              setSettings(next);
+              saveSettings(next);
+            }}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              {settings.showSights ? (
+                <>
+                  <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" />
+                  <circle cx="12" cy="12" r="3" />
+                </>
+              ) : (
+                <>
+                  <path d="M2 12s3.5-7 10-7c2 0 3.8.7 5.3 1.6M22 12s-3.5 7-10 7c-2 0-3.8-.7-5.3-1.6" />
+                  <path d="M3 3l18 18" />
+                </>
+              )}
             </svg>
           </button>
           <button

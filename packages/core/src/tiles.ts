@@ -74,9 +74,15 @@ export function corridorTiles(
   });
 }
 
-/** Rough size of a tile download, for telling the user before they start it. */
-export function estimateMB(tileCount: number): number {
-  return Math.round((tileCount * 22) / 1024); // ~22 kB per OpenTopoMap tile
+/**
+ * Rough size of a tile download, for telling the walker before they start it.
+ *
+ * Per-provider, because the spread is wide: an OSM raster tile is about 18 kB
+ * and a French IGN one nearer 60, so a single constant would understate some
+ * downloads threefold.
+ */
+export function estimateMB(tileCount: number, tileKB = 22): number {
+  return Math.round((tileCount * tileKB) / 1024);
 }
 
 /** How many of these tiles are already downloaded. */
@@ -163,4 +169,29 @@ export async function storageUsedMB(): Promise<number | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * A downloadable tile source for a chosen map provider.
+ *
+ * Zoom levels stop at 16 whatever the provider offers. Each extra level
+ * quadruples the tile count, and 16 is already enough to see individual
+ * buildings — going further would turn a 20 MB download into an 80 MB one
+ * for detail nobody reads while walking.
+ */
+export function sourceForProvider(
+  provider: { url: string; maxNativeZoom: number; keyName?: string },
+  key?: string | null,
+  corridorM = OPENTOPO.corridorM,
+): TileSource | null {
+  const url = provider.keyName
+    ? key
+      ? provider.url.replace("{key}", encodeURIComponent(key))
+      : null
+    : provider.url;
+  if (!url) return null;
+  const top = Math.min(16, provider.maxNativeZoom);
+  const zooms: number[] = [];
+  for (let z = 12; z <= top; z++) zooms.push(z);
+  return { url, zooms, corridorM };
 }

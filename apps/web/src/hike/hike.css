@@ -84,13 +84,19 @@ header.bar .menu { position: relative; }
 .map-note { position: absolute; left: 10px; top: 10px; z-index: 900; background: rgba(255,255,255,.92); border-radius: 10px; padding: 6px 10px; font-size: 12px; color: var(--muted); box-shadow: var(--shadow); max-width: 70%; }
 .leaflet-container { font: inherit; }
 .you-marker { width: 18px; height: 18px; border-radius: 50%; background: #2563eb; border: 3px solid #fff; box-shadow: 0 0 0 2px rgba(37,99,235,.45), 0 2px 6px rgba(0,0,0,.35); }
-.mk { border-radius: 50%; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.4); color: #fff; font-size: 10px; font-weight: 700; display: grid; place-items: center; }
-.mk.wp { width: 20px; height: 20px; background: #1f2937; }
-.mk.wp.done { background: #9ca3af; }
-.mk.poi { width: 12px; height: 12px; background: #d97706; }
-.mk.water { width: 12px; height: 12px; background: #0284c7; }
-.mk.peak { width: 14px; height: 14px; background: #4b5563; border-radius: 3px; transform: rotate(45deg); }
-.mk.hut { width: 14px; height: 14px; background: #7c2d12; border-radius: 3px; }
+/* Sight markers are kept small on purpose: at the old 12–14px plus a 2px ring
+   they covered the contour lines and path junctions underneath, which is the
+   information you are actually navigating by. A 7px dot still sits under a
+   thumb easily — Leaflet's tap target is the icon box, not the drawn dot —
+   and it marks the map rather than hiding it. Waypoints stay larger because
+   they carry a label. */
+.mk { border-radius: 50%; border: 1.5px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,.45); color: #fff; font-size: 9px; font-weight: 700; display: grid; place-items: center; }
+.mk.mk-wp { width: 18px; height: 18px; background: #1f2937; border-width: 2px; }
+.mk.mk-wp.done { background: #9ca3af; }
+.mk.mk-poi { width: 7px; height: 7px; background: #d97706; }
+.mk.mk-water { width: 7px; height: 7px; background: #0284c7; }
+.mk.mk-peak { width: 8px; height: 8px; background: #4b5563; border-radius: 2px; transform: rotate(45deg); }
+.mk.mk-hut { width: 8px; height: 8px; background: #7c2d12; border-radius: 2px; }
 .leaflet-popup-content { margin: 10px 12px; font-size: 13px; line-height: 1.35; }
 
 /* ---------- sheet ---------- */

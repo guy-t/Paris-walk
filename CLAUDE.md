@@ -21,7 +21,7 @@ this locally" — if it cannot happen in CI, it needs saying out loud.
 packages/core     geometry, map-matching, the GPS tracker, sessions, GPX,
                   sun times, Overpass and Wikipedia clients, offline tiles.
                   No React, no Leaflet, no DOM beyond the browser APIs that
-                  are the point. 139 unit tests.
+                  are the point. 155 unit tests.
 packages/ui       MapView, ElevationProfile, Sheet, StatTile, Toast, and the
                   geolocation / wake-lock / service-worker hooks.
 apps/web          one Vite app, one HTML entry per guide, two build targets.
@@ -72,6 +72,17 @@ now — do not add build-tool configs to `tsconfig.include`.
 no-sourcemap payload for the APK. Shipping the Pages build inside the APK
 points every asset at a URL the phone may have no signal to reach.
 
+**Base maps are pluggable** (`packages/core/src/providers.ts`). Every provider
+listed there permits caching tiles for offline use — that is an entry
+requirement, not a coincidence, and it is why Google is absent: its terms
+explicitly forbid offline use and pre-fetching. Coverage boxes are approximate
+and overlap near borders on purpose; which map to prefer is the app's call via
+`PREFERRED_PROVIDERS`, not the geometry's.
+
+**Marker classes are namespaced `mk-<kind>`.** A bare `.poi` on a map marker
+matched the sheet's list-card rule and inherited its 12px padding, silently
+tripling every dot on the map.
+
 **Always send `Cache-Control: no-cache` when checking the live site.** The
 Pages CDN caches 404s, so a path a deploy just added keeps answering 404.
 
@@ -80,7 +91,7 @@ Pages CDN caches 404s, so a path a deploy just added keeps answering 404.
 ```bash
 pnpm install
 pnpm typecheck          # tsc --build across all projects
-pnpm test               # vitest, 139 tests
+pnpm test               # vitest, 155 tests
 pnpm build              # web build for Pages
 pnpm --filter @slownav/web build:native   # payload for the APK
 pnpm --filter @slownav/web dev            # local dev server
