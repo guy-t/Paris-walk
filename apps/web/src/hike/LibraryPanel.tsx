@@ -29,6 +29,7 @@ import {
 } from "@slownav/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { APP, library, type Hike, type HikeSettings } from "./model.js";
+import { gpxAccept } from "../shared/platform.js";
 
 /** A small SVG sparkline of the elevation profile, for the row. */
 function Thumb({ track }: { track: ProcessedTrack }) {
@@ -185,7 +186,20 @@ export function LibraryPanel({
     onAutoPrepared?.();
   }, [autoPrepareId, hikes, onAutoPrepared]);
 
+  /**
+   * Import whatever was picked.
+   *
+   * The picker is unfiltered on a phone (see `gpxAccept`), so anything at all
+   * can arrive here and being handed something that is not a GPX is a normal
+   * outcome, not an error case to be surprised by. Each file is parsed, and
+   * the batch reports once: a toast per file means only the last is ever
+   * read, which with `multiple` on is the usual case.
+   */
   const importFiles = async (files: FileList) => {
+    const failures: string[] = [];
+    let imported = 0;
+    let lastName = "";
+
     for (const f of Array.from(files)) {
       try {
         const parsed = parseGPX(await f.text(), f.name.replace(/\.gpx$/i, ""));
@@ -195,10 +209,19 @@ export function LibraryPanel({
           pts: repairElevation(parsed.pts),
           wpts: parsed.wpts,
         });
-        onToast(`Imported ${f.name}`);
+        imported++;
+        lastName = parsed.name;
       } catch (err) {
-        onToast(`${f.name}: ${err instanceof Error ? err.message : "could not be read"}`);
+        failures.push(`${f.name}: ${err instanceof Error ? err.message : "could not be read"}`);
       }
+    }
+
+    if (imported && !failures.length) {
+      onToast(imported === 1 ? `Imported ${lastName}` : `Imported ${imported} hikes`);
+    } else if (imported) {
+      onToast(`Imported ${imported}, skipped ${failures.length} — ${failures[0]}`);
+    } else {
+      onToast(failures[0] ?? "Nothing to import");
     }
     onChanged();
   };
@@ -303,10 +326,11 @@ export function LibraryPanel({
       </div>
 
       <div className="panel-foot">
+        {/* accept is undefined on a phone, where a filter greys the file out. */}
         <input
           ref={fileInput}
           type="file"
-          accept=".gpx,application/gpx+xml"
+          accept={gpxAccept()}
           hidden
           multiple
           onChange={(e) => {
