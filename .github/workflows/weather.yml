@@ -1,0 +1,46 @@
+name: Weather contract
+
+# Open-Meteo is somebody else's service, and the app reads named fields out
+# of it. A renamed field passes every unit test — they run against a fixture —
+# and shows up as an empty column on a mountain instead.
+#
+# So this calls the live API and checks the fields are still there. It runs
+# on pull requests that touch the forecast, and weekly, because the contract
+# can break with no change on this side at all.
+#
+# Deliberately NOT part of deploy.yml: a walk must never be blocked because
+# a weather service is having an afternoon.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "packages/core/src/weather*"
+      - "apps/web/src/hike/weather*"
+      - ".github/workflows/weather.yml"
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: weather-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Ask the live service for the fields the app reads
+        env:
+          WEATHER_CONTRACT: "1"
+        run: pnpm vitest run packages/core/src/weather.contract.test.ts

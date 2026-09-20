@@ -52,6 +52,7 @@ import { APP_VERSION } from "../shared/version.js";
 import { onOpenedFiles } from "../shared/openedFiles.js";
 import { importGpxFiles, importMessage } from "./importGpx.js";
 import { useHike } from "./useHike.js";
+import { useWeather } from "./useWeather.js";
 import "./hike.css";
 
 /** Keeps elapsed time and the moving average ticking between GPS fixes. */
@@ -316,6 +317,12 @@ export function App() {
     return out;
   }, [state.waypoints, state.sights, settings.showSights]);
 
+  // The pace the ETA has settled on, so the forecast and the arrival time on
+  // the dashboard never disagree about when the walker reaches the col.
+  const paceFactor =
+    hike.eta && hike.eta.toblerLeft > 0 ? hike.eta.seconds / hike.eta.toblerLeft : 1;
+  const weather = useWeather(state.hike?.id ?? null, state.track, state.progress, paceFactor);
+
   const trail = useMemo(
     () => state.session?.trail.map((p) => [p[0], p[1]] as LatLon),
     [state.session],
@@ -565,6 +572,15 @@ export function App() {
             return next;
           })
         }
+        weather={{
+          rows: weather.rows,
+          status: weather.status,
+          fetchedAt: weather.fetchedAt,
+          savedOffline: weather.savedOffline,
+          barometer: weather.barometer,
+          fmt,
+          onRefresh: weather.refresh,
+        }}
         onShowOnMap={(s) => {
           setFollow(false);
           setFlyTo({ pos: [s.lat, s.lon], nonce: Date.now() });

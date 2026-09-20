@@ -1,7 +1,12 @@
 package io.github.guyt.slownavigator;
 
+import android.content.Context;
 import android.content.Intent;
 import android.database.Cursor;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
 import android.net.Uri;
 import android.os.Bundle;
 import android.provider.OpenableColumns;
@@ -58,13 +63,35 @@ public class MainActivity extends BridgeActivity {
     /** Files read from an intent and not yet collected by the web layer. */
     private final List<JSONObject> pending = new ArrayList<>();
 
+    /** The barometer, on the phones that have one. */
+    private final Barometer barometer = new Barometer();
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getBridge().getWebView().addJavascriptInterface(new OpenedFiles(), "SlowNavFiles");
+        getBridge().getWebView().addJavascriptInterface(barometer, "SlowNavBarometer");
         // Whatever launched us, if anything. The web layer collects it once
         // it has loaded; there is nothing to notify yet.
         readFrom(getIntent());
+    }
+
+    /**
+     * The pressure sensor runs only while the app is on screen, for the same
+     * reason the GPS does. It costs a fraction of what the GNSS chip does,
+     * but a reading nobody is looking at is worth nothing either way, and
+     * the trend is measured in hours from the readings that were taken.
+     */
+    @Override
+    public void onResume() {
+        super.onResume();
+        barometer.start((SensorManager) getSystemService(Context.SENSOR_SERVICE));
+    }
+
+    @Override
+    public void onPause() {
+        barometer.stop();
+        super.onPause();
     }
 
     @Override
@@ -174,6 +201,74 @@ public class MainActivity extends BridgeActivity {
         final WebView web = getBridge() == null ? null : getBridge().getWebView();
         if (web == null) return;
         web.post(() -> web.evaluateJavascript("window.dispatchEvent(new Event('slownav:openedfiles'))", null));
+    }
+
+    /**
+     * The barometer, as the web layer sees it.
+     *
+     * A phone's pressure sensor is the one instrument in it that beats GPS
+     * at something the app cares about: height that does not jitter, and
+     * weather arriving hours before it is visible. Plenty of phones have no
+     * barometer at all, so `available` is asked first and everything
+     * degrades to nothing when the answer is no.
+     *
+     * The listener keeps only the latest reading. The web layer decides how
+     * often to look and what history to keep, because it is the side that
+     * knows what the reading is for.
+     */
+    public static class Barometer implements SensorEventListener {
+        private SensorManager sensors;
+        private Sensor sensor;
+        private volatile float hPa = Float.NaN;
+        private volatile long at = 0L;
+
+        void start(SensorManager manager) {
+            if (manager == null) return;
+            sensors = manager;
+            sensor = manager.getDefaultSensor(Sensor.TYPE_PRESSURE);
+            if (sensor == null) return;
+            // The slowest rate the platform offers: pressure moves over
+            // minutes and hours, and this runs for the length of a walk.
+            manager.registerListener(this, sensor, SensorManager.SENSOR_DELAY_NORMAL);
+        }
+
+        void stop() {
+            if (sensors != null && sensor != null) sensors.unregisterListener(this);
+        }
+
+        @Override
+        public void onSensorChanged(SensorEvent event) {
+            if (event.values.length == 0) return;
+            hPa = event.values[0];
+            at = System.currentTimeMillis();
+        }
+
+        @Override
+        public void onAccuracyChanged(Sensor s, int accuracy) {
+            /* nothing to do: a pressure sensor does not need calibrating */
+        }
+
+        /** Whether this phone has a barometer at all. */
+        @JavascriptInterface
+        public boolean available() {
+            return sensor != null;
+        }
+
+        /** The latest reading as JSON, or null before one has arrived. */
+        @JavascriptInterface
+        public String read() {
+            float value = hPa;
+            long when = at;
+            if (Float.isNaN(value) || when == 0L) return null;
+            try {
+                JSONObject out = new JSONObject();
+                out.put("hPa", value);
+                out.put("at", when);
+                return out.toString();
+            } catch (JSONException e) {
+                return null;
+            }
+        }
     }
 
     /**

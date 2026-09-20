@@ -29,6 +29,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { APP, library, type Hike, type HikeSettings } from "./model.js";
 import { gpxAccept } from "../shared/platform.js";
 import { importGpxFiles, importMessage } from "./importGpx.js";
+import { refreshForecast } from "./weather.js";
 
 /** A small SVG sparkline of the elevation profile, for the row. */
 function Thumb({ track }: { track: ProcessedTrack }) {
@@ -147,6 +148,13 @@ export function LibraryPanel({
           setProgressText((p) => ({ ...p, [h.id]: "Looking up sights and articles…" }));
           await onPrepareSights(h, track);
         }
+        // The forecast too, while there is still signal — it is the thing
+        // most obviously wanted on the hill and least obtainable there. It
+        // is small and it is a bonus: a weather service having an afternoon
+        // must not stop the map downloading.
+        setProgressText((p) => ({ ...p, [h.id]: "Getting the forecast…" }));
+        await refreshForecast(h.id, track).catch(() => undefined);
+
         const urls = urlsFor(h.pts);
         const res = await precacheTiles(urls, ({ done, total, failed }) => {
           setProgressText((p) => ({
