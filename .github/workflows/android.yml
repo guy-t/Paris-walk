@@ -72,18 +72,61 @@ jobs:
           echo "VERSION_NAME=${VERSION_NAME}" >> "$GITHUB_ENV"
           grep -E "versionCode|versionName" app/build.gradle
 
+      # Android identifies an app by package name AND signing key, and refuses
+      # to update one signed with a different key. Gradle's debug key is
+      # generated per machine, so CI minted a fresh one every run and every
+      # update failed with "App not installed". A stable key, kept in secrets
+      # and never in the repository, is the fix.
+      - name: Unlock the signing key
+        id: signing
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          set -eu
+          if [ -z "${KEYSTORE_B64:-}" ]; then
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::No ANDROID_KEYSTORE_BASE64 secret. Building a debug APK, which cannot update an install signed by a different key."
+            exit 0
+          fi
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/slownav.jks"
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+
       - name: Build the APK
         working-directory: apps/mobile/android
-        run: ./gradlew --no-daemon assembleDebug
+        env:
+          SLOWNAV_KEYSTORE: ${{ steps.signing.outputs.signed == 'true' && format('{0}/slownav.jks', runner.temp) || '' }}
+          SLOWNAV_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          SLOWNAV_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          SLOWNAV_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -eu
+          if [ "${{ steps.signing.outputs.signed }}" = "true" ]; then
+            ./gradlew --no-daemon assembleRelease
+          else
+            ./gradlew --no-daemon assembleDebug
+          fi
 
       - name: Name the artifact
         run: |
           set -eu
-          SRC=apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          if [ "${{ steps.signing.outputs.signed }}" = "true" ]; then
+            SRC=apps/mobile/android/app/build/outputs/apk/release/app-release.apk
+          else
+            SRC=apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          fi
           test -f "$SRC"   # never publish a missing build
           mkdir -p out
           cp "$SRC" "out/slow-navigator-${VERSION_NAME}.apk"
           ls -la out
+
+      # The signing certificate must not change between builds, or the next
+      # update fails the same way. Printing it makes a drift visible in the log
+      # rather than on a phone halfway up a mountain.
+      - name: Report the signing certificate
+        run: |
+          set -eu
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort | tail -1)
+          "$APKSIGNER" verify --print-certs out/*.apk | grep -i "SHA-256 digest" || true
 
       - uses: actions/upload-artifact@v4
         with:
@@ -103,6 +146,8 @@ jobs:
             --title "Slow Navigator — latest Android build" \
             --notes "Built from ${{ github.sha }} on $(date -u +'%Y-%m-%d %H:%M') UTC.
 
-          Debug-signed, for sideloading. Android will ask you to allow installing from your browser the first time.
+          ${{ steps.signing.outputs.signed == 'true' && 'Signed with the stable release key, so it updates in place over any earlier build that used it.' || 'DEBUG-SIGNED — this build cannot update an existing install. Add the ANDROID_KEYSTORE_BASE64 secret to fix that.' }}
+
+          Android will ask you to allow installing from your browser the first time.
 
           Download: https://github.com/${{ github.repository }}/releases/download/android-latest/slow-navigator-${VERSION_NAME}.apk"

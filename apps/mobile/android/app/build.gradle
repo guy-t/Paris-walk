@@ -16,10 +16,39 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    /*
+     * Signing.
+     *
+     * Android identifies an app by package name *and* signing key, and refuses
+     * to update one with a build signed by a different key. Gradle's debug key
+     * is generated per machine, so CI produced a new one on every run and every
+     * update failed with "App not installed". The key therefore has to be
+     * stable and come from outside the repository.
+     *
+     * The keystore arrives as a file path plus passwords in the environment,
+     * set from GitHub Secrets. When they are absent — a local build, or a fork
+     * — this block does nothing and the build falls back to debug signing,
+     * which is fine for running on your own machine.
+     */
+    signingConfigs {
+        release {
+            def storePath = System.getenv("SLOWNAV_KEYSTORE")
+            if (storePath) {
+                storeFile file(storePath)
+                storePassword System.getenv("SLOWNAV_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("SLOWNAV_KEY_ALIAS") ?: "slownav"
+                keyPassword System.getenv("SLOWNAV_KEY_PASSWORD") ?: System.getenv("SLOWNAV_KEYSTORE_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (System.getenv("SLOWNAV_KEYSTORE")) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 }
