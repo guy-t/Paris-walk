@@ -13,11 +13,9 @@ import {
   sourceForProvider,
   downloadGPX,
   estimateMB,
-  parseGPX,
   precacheTiles,
   processTrack,
   records,
-  repairElevation,
   storageUsedMB,
   store,
   toGPX,
@@ -29,6 +27,8 @@ import {
 } from "@slownav/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { APP, library, type Hike, type HikeSettings } from "./model.js";
+import { gpxAccept } from "../shared/platform.js";
+import { importGpxFiles, importMessage } from "./importGpx.js";
 
 /** A small SVG sparkline of the elevation profile, for the row. */
 function Thumb({ track }: { track: ProcessedTrack }) {
@@ -185,21 +185,19 @@ export function LibraryPanel({
     onAutoPrepared?.();
   }, [autoPrepareId, hikes, onAutoPrepared]);
 
+  /**
+   * Import whatever was picked.
+   *
+   * The picker is unfiltered on a phone (see `gpxAccept`), so anything at
+   * all can arrive here — being handed something that is not a GPX is a
+   * normal outcome, not a surprise. What happens to the contents is shared
+   * with routes opened from outside the app, so the two cannot drift.
+   */
   const importFiles = async (files: FileList) => {
-    for (const f of Array.from(files)) {
-      try {
-        const parsed = parseGPX(await f.text(), f.name.replace(/\.gpx$/i, ""));
-        library.add({
-          id: library.idFor(f.name, parsed.pts.length),
-          name: parsed.name,
-          pts: repairElevation(parsed.pts),
-          wpts: parsed.wpts,
-        });
-        onToast(`Imported ${f.name}`);
-      } catch (err) {
-        onToast(`${f.name}: ${err instanceof Error ? err.message : "could not be read"}`);
-      }
-    }
+    const incoming = await Promise.all(
+      Array.from(files).map(async (f) => ({ name: f.name, text: await f.text() })),
+    );
+    onToast(importMessage(importGpxFiles(incoming)));
     onChanged();
   };
 
@@ -303,10 +301,11 @@ export function LibraryPanel({
       </div>
 
       <div className="panel-foot">
+        {/* accept is undefined on a phone, where a filter greys the file out. */}
         <input
           ref={fileInput}
           type="file"
-          accept=".gpx,application/gpx+xml"
+          accept={gpxAccept()}
           hidden
           multiple
           onChange={(e) => {

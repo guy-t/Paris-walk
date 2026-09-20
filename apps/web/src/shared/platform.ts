@@ -36,6 +36,28 @@ export function platform(): "android" | "ios" | "web" {
 }
 
 /**
+ * The `accept` for a GPX file picker — or nothing, where filtering breaks it.
+ *
+ * On Android the WebView turns `accept` into a MIME list for the Storage
+ * Access Framework, and there is no MIME type everyone agrees a .gpx has.
+ * A document provider may report one as `application/octet-stream`,
+ * `application/xml`, `application/gpx+xml` or nothing at all, and the picker
+ * greys out every file that does not match — so a GPX sitting in a subfolder
+ * of Documents simply cannot be tapped, while the same file reached through
+ * Recents sometimes can. iOS maps `accept` to UTIs and fails the same way for
+ * an extension it does not know.
+ *
+ * So on a phone the picker is left unfiltered, and what was picked is checked
+ * after the fact by parsing it. That is where the real check belongs anyway:
+ * a file arriving from a content:// URI need not have a meaningful name, and
+ * a name has never been evidence of contents.
+ */
+export function gpxAccept(ua: string = navigator.userAgent): string | undefined {
+  if (/Android|iPhone|iPad|iPod/i.test(ua)) return undefined;
+  return ".gpx,application/gpx+xml,application/xml,text/xml";
+}
+
+/**
  * Open a URL outside the app.
  *
  * In the native shell this uses an in-app browser with a close button, so the
