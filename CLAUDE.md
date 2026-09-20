@@ -131,11 +131,18 @@ on PATH.
 
 ## CI
 
-| Workflow      | Trigger        | Does                                          |
-| ------------- | -------------- | --------------------------------------------- |
-| `deploy.yml`  | push to `main` | typecheck, test, build, publish to Pages       |
-| `android.yml` | push to `main` | builds an APK, replaces the `android-latest` release |
-| `ios.yml`     | push to `main` | compiles unsigned on macOS — a rot check only  |
+| Workflow      | Trigger                  | Does                                          |
+| ------------- | ------------------------ | --------------------------------------------- |
+| `deploy.yml`  | push to `main`, and PRs  | typecheck, test, build; publishes to Pages only on `main` |
+| `android.yml` | push to `main`           | builds an APK, replaces the `android-latest` release |
+| `ios.yml`     | push to `main`           | compiles unsigned on macOS — a rot check only  |
+
+A pull request runs `deploy.yml`'s gates and publishes nothing: the
+publishing steps are skipped individually rather than the job being split, so
+the run that guards a change is the same run that would deploy it.
+**`android.yml` is still push-only**, so the Java in `apps/mobile` is first
+compiled after a merge — a mistake there lands on `main` before anything
+says so.
 
 The APK download URL is fixed:
 `https://github.com/guy-t/Paris-walk/releases/download/android-latest/`
