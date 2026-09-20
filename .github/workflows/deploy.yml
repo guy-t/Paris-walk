@@ -1,8 +1,19 @@
 name: Deploy
 
-# Every push to main publishes the site to GitHub Pages. Nothing is ever uploaded by hand.
+# Every push to main publishes the site to GitHub Pages. Nothing is ever
+# uploaded by hand.
+#
+# A pull request runs the same gates — typecheck, tests, the real build, and
+# the assembly that proves the built entry exists — and publishes nothing.
+# Before this, both workflows were push-to-main only, so a pull request had
+# no checks at all and the first time anything ran was after the merge, with
+# the APK already rebuilding. The publishing steps are individually skipped
+# rather than the job split in two, so the run that guards a change is the
+# same run that would deploy it.
 on:
   push:
+    branches: [main]
+  pull_request:
     branches: [main]
   workflow_dispatch:
 
@@ -12,9 +23,12 @@ permissions:
   id-token: write
 
 # One deploy at a time; never cancel a run that is already publishing.
+# A pull request gets its own group per branch, so a check run can neither
+# queue behind a deploy nor hold one up, and a new push to the branch does
+# cancel the check it supersedes.
 concurrency:
-  group: pages
-  cancel-in-progress: false
+  group: pages-${{ github.event_name == 'pull_request' && github.ref || 'main' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
@@ -50,6 +64,7 @@ jobs:
       # Either way the check at the end of the deploy job says whether the
       # live site is really serving this build.
       - name: Make GitHub Actions the Pages source
+        if: github.event_name != 'pull_request'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.PAGES_ADMIN_TOKEN || github.token }}
@@ -61,6 +76,7 @@ jobs:
           fi
 
       - uses: actions/configure-pages@v5
+        if: github.event_name != 'pull_request'
         with:
           enablement: true
 
@@ -68,7 +84,7 @@ jobs:
       # in the same place the APK says it. The channel is part of the string
       # because the two workflows have their own run numbers.
       - name: Build the site
-        run: SLOWNAV_VERSION="$(date -u +%Y.%m.%d).${{ github.run_number }} web ${GITHUB_SHA:0:7}" pnpm build
+        run: SLOWNAV_VERSION="$(date -u +%Y.%m.%d).${{ github.run_number }} ${{ github.event_name == 'pull_request' && 'pr' || 'web' }} ${GITHUB_SHA:0:7}" pnpm build
 
       - name: Assemble site
         run: |
@@ -88,11 +104,15 @@ jobs:
           find site -type f | sort
 
       - uses: actions/upload-pages-artifact@v3
+        if: github.event_name != 'pull_request'
         with:
           path: site
 
   deploy:
     needs: build
+    # Nothing a pull request does reaches the site. The gates above have run
+    # by this point, which is the whole value of the run.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
