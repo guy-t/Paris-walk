@@ -54,6 +54,65 @@ export const store: Store = {
   },
 };
 
+export interface StorageReport {
+  /** Everything this origin has in localStorage, in kB. */
+  totalKB: number;
+  /** The biggest keys, largest first — what is actually using the space. */
+  top: Array<{ key: string; kB: number }>;
+  /**
+   * Whether a write of `probeKB` actually succeeded just now.
+   *
+   * The only question that matters when a hike will not save. localStorage
+   * does not report its limit and browsers disagree about it (a WebView is
+   * usually around 5 MB per origin), so asking is the only honest answer —
+   * and a full quota and switched-off site data fail identically from here.
+   */
+  canWrite: boolean;
+  /** What the failed write said, when it failed. */
+  error?: string;
+}
+
+/**
+ * What is in storage, and whether anything more will fit.
+ *
+ * Written to be read out loud from a hillside: a walker who is told a hike
+ * imported and cannot find it needs to know whether it was ever saved.
+ */
+export function storageReport(probeKB = 64): StorageReport {
+  const sizes: Array<{ key: string; kB: number }> = [];
+  let total = 0;
+  for (const key of store.keys()) {
+    let raw: string | null = null;
+    try {
+      raw = localStorage.getItem(key);
+    } catch {
+      /* counted as nothing, which is all that can be said */
+    }
+    // UTF-16 in every engine that implements it: two bytes a character.
+    const bytes = ((raw?.length ?? 0) + key.length) * 2;
+    total += bytes;
+    sizes.push({ key, kB: Math.round(bytes / 102.4) / 10 });
+  }
+
+  const probe = "x".repeat(probeKB * 512); // 512 UTF-16 chars = 1 kB
+  let canWrite = false;
+  let error: string | undefined;
+  try {
+    localStorage.setItem("slownav:probe", probe);
+    localStorage.removeItem("slownav:probe");
+    canWrite = true;
+  } catch (e) {
+    error = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+  }
+
+  return {
+    totalKB: Math.round(total / 102.4) / 10,
+    top: sizes.sort((a, b) => b.kB - a.kB).slice(0, 6),
+    canWrite,
+    ...(error === undefined ? {} : { error }),
+  };
+}
+
 /**
  * A short stable id from a string — used to key an imported GPX by its name
  * and length so re-importing the same file does not duplicate it.
