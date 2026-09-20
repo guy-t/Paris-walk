@@ -119,7 +119,23 @@ jobs:
             # artifact must not be — that second check is what catches a
             # branch deploy masquerading as a successful one.
             if [ "$code" = "200" ] && [ "$repo" = "404" ]; then
-              echo "Live site is serving the built artifact."
+              # A 200 on the HTML shell proves very little — it is a few
+              # hundred bytes that load nothing by themselves. Follow the
+              # script it references and check that actually exists, which is
+              # what catches a build written with the wrong base path.
+              asset=$(curl -s -H 'Cache-Control: no-cache' "${base}next/hike.html" |
+                grep -o 'src="[^"]*\.js"' | head -1 | sed 's/src="//; s/"//')
+              if [ -z "$asset" ]; then
+                echo "::error::The deployed page references no script."
+                exit 1
+              fi
+              asset_code=$(nocache "https://guy-t.github.io${asset}")
+              echo "  referenced script ${asset} -> ${asset_code}"
+              if [ "$asset_code" != "200" ]; then
+                echo "::error::The deployed page references ${asset}, which is not being served. Check the Vite base path."
+                exit 1
+              fi
+              echo "Live site is serving the built artifact, and its script loads."
               exit 0
             fi
           done

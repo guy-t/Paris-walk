@@ -10,3 +10,9 @@ __pycache__/
 .pytest_cache/
 test-results/
 *.tsbuildinfo
+# TypeScript project-reference output. Kept out of the tree entirely: a stale
+# emitted vite.config.js once shadowed vite.config.ts (Vite prefers .js) and
+# silently froze the build's base path.
+dist-types/
+apps/*/vite.config.js
+apps/*/vite.config.d.ts
