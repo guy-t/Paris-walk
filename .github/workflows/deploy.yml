@@ -105,10 +105,15 @@ jobs:
         run: |
           set -eu
           base="${{ steps.deployment.outputs.page_url }}"
+          # -H no-cache matters: the Pages CDN caches 404s, so a path that
+          # was missing before this deploy keeps answering 404 from the edge
+          # long after the deploy that added it. Without this the check is a
+          # false negative on every deploy.
+          nocache() { curl -s -o /dev/null -w '%{http_code}' -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' "$1"; }
           for attempt in 1 2 3 4 5 6; do
             sleep 10
-            code=$(curl -s -o /dev/null -w '%{http_code}' "${base}next/hike.html")
-            repo=$(curl -s -o /dev/null -w '%{http_code}' "${base}package.json")
+            code=$(nocache "${base}next/hike.html")
+            repo=$(nocache "${base}package.json")
             echo "attempt ${attempt}: next/hike.html=${code} package.json=${repo}"
             # The built page must be there, and a repo file that is not in the
             # artifact must not be — that second check is what catches a
