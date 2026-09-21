@@ -231,6 +231,14 @@ sending a copyrighted document with someone's mobile number in it to a third
 party. Where a model does earn its place is turning a scanned PDF into the
 notes format, which happens once per day, off the phone.
 
+**The hike already open needs a way back, not an Open.** The library row for
+the current hike hid its primary button, on the reasoning that opening what
+is open makes no sense. But "Prepare this hike for offline" in the menu sends
+the walker straight to that row, so the one row they were sent to was the
+only one with no button to leave by — just the ✕ at the top of the panel,
+which is not what anyone reaches for when a download finishes. It says
+"Back to hike" now and simply closes the panel.
+
 **Always send `Cache-Control: no-cache` when checking the live site.** The
 Pages CDN caches 404s, so a path a deploy just added keeps answering 404.
 

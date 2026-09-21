@@ -263,7 +263,23 @@ export function LibraryPanel({
               <Thumb track={track} />
 
               <div className="acts">
-                {h.id !== currentId && (
+                {/*
+                  The hike already open needs a way back, not an Open. It had
+                  neither: "Prepare this hike for offline" in the menu sends
+                  the walker straight to this row, and it was the one row
+                  with no button to leave by — only the ✕ at the top of the
+                  panel, which is not what anyone looks for after a download
+                  finishes.
+
+                  Back rather than re-open: the hike is already loaded, so
+                  closing the panel is the whole job and cannot disturb a
+                  session in progress.
+                */}
+                {h.id === currentId ? (
+                  <button className="primary" onClick={onClose}>
+                    Back to hike
+                  </button>
+                ) : (
                   <button className="primary" onClick={() => onOpen(h.id)}>
                     Open
                   </button>
