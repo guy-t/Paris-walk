@@ -129,7 +129,8 @@ like one built without the change, and the phone can now be asked.
 the picker is left unfiltered on Android and iOS (`gpxAccept`) and what was
 picked is checked by parsing it. The intent-filters list every one of those
 types for the same reason, `octet-stream` included, which is why the app also
-appears in "Open with" for other unrecognised files.
+appears in "Open with" for other unrecognised files. Confirmed working on a
+real phone — tapping a .gpx and choosing the app imports the route.
 
 **Capacitor delivers the launching intent twice.** `BridgeActivity.load()`
 calls `onNewIntent(getIntent())` from inside `super.onCreate()`, so an
@@ -294,9 +295,6 @@ done by hand once — the settings API needs repo-admin rights the default
   matches the other variant's stretch and offer to switch, but being asked
   "are you on the hard one?" halfway up a muddy path is worse than choosing
   at the signpost.
-- **Open with is unconfirmed on a real phone.** The intent-filters decode
-  correctly in the built APK but the app has not been seen in Android's
-  chooser; the next clue is which app the .gpx is being shared *from*.
 - Native sensors: step counter and background location. The seam is
   `PositionWatcher` in `@slownav/ui` — swap the watcher, change nothing else.
   The barometer is done: `SlowNavBarometer` in `MainActivity`, read through
