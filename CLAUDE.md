@@ -34,6 +34,8 @@ Inside the hike app, roughly in the order a walker meets them:
 
 ```
 App.tsx           the shell: header, live cue, dashboard, map, sheet, panels
+                  (the cue sits between dashboard and map — confirmed as the
+                  right place by the owner, at an actual junction)
 useHike.ts        where the walker is — fixes, matching, session, sights
 Dashboard.tsx     the tiles, elevation profile and next-waypoint strip
 LibraryPanel.tsx  choose a hike, import GPX, prepare for offline
@@ -68,6 +70,11 @@ real URL only once that app has been walked with.
 
 When porting the remaining two, read the original HTML first — it is the
 specification, and its constants were tuned against real journeys.
+
+**The two ports are deliberately parked** until after the Picos hiking week.
+The hike app is what is being walked with; changing the other two now buys
+nothing and every change is one more thing that could be wrong in a valley
+with no signal. Do not start a port without being asked.
 
 ## Things that will catch you out
 
@@ -165,6 +172,8 @@ is used when there is one and the reading says which it used. Never present
 an uncalibrated pressure altitude as if it were a position. The sensor is
 Android-only (no shipping web API exposes a barometer) and absent on many
 phones, so everything degrades to nothing through `barometerAvailable()`.
+Confirmed working on the owner's phone: pressure, trend and a calibrated
+height all read correctly.
 
 **Route notes never enter this repository.** They are the walking company's
 words — a personal copy of a copyrighted document, with the host's mobile
