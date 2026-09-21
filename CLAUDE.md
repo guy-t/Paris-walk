@@ -34,6 +34,8 @@ Inside the hike app, roughly in the order a walker meets them:
 
 ```
 App.tsx           the shell: header, live cue, dashboard, map, sheet, panels
+                  (the cue sits between dashboard and map — confirmed as the
+                  right place by the owner, at an actual junction)
 useHike.ts        where the walker is — fixes, matching, session, sights
 Dashboard.tsx     the tiles, elevation profile and next-waypoint strip
 LibraryPanel.tsx  choose a hike, import GPX, prepare for offline
@@ -68,6 +70,11 @@ real URL only once that app has been walked with.
 
 When porting the remaining two, read the original HTML first — it is the
 specification, and its constants were tuned against real journeys.
+
+**The two ports are deliberately parked** until after the Picos hiking week.
+The hike app is what is being walked with; changing the other two now buys
+nothing and every change is one more thing that could be wrong in a valley
+with no signal. Do not start a port without being asked.
 
 ## Things that will catch you out
 
@@ -165,6 +172,8 @@ is used when there is one and the reading says which it used. Never present
 an uncalibrated pressure altitude as if it were a position. The sensor is
 Android-only (no shipping web API exposes a barometer) and absent on many
 phones, so everything degrades to nothing through `barometerAvailable()`.
+Confirmed working on the owner's phone: pressure, trend and a calibrated
+height all read correctly.
 
 **Route notes never enter this repository.** They are the walking company's
 words — a personal copy of a copyrighted document, with the host's mobile
@@ -220,6 +229,37 @@ is usually one you pass or can see, and anchoring on a sighting is worse
 than not anchoring. Everything between anchors is interpolated, which
 rescales the printed kilometres onto measured ones. Congarna, Beares and
 San Pelayo land exactly; the fit elsewhere is within about 150 m.
+
+**The embedded library is generated, not typed.** `apps/web/src/hike/tracks.json`
+is built from `tracks/*.gpx` by `scripts/build-tracks.mjs`, and `deploy.yml`
+runs it with `--check` so the two cannot drift. It exists because the
+hand-made copy shipped the whole of each file: one day's GPX carries the
+route as several named sub-tracks — a `SPINE`, an `OPTION` for the harder
+alternative, an `END` per possible hotel — and `parseGPX` concatenates every
+`<trkpt>` in the document, which is the only honest thing to do with a file
+it has never seen. Day 1 was therefore 34.6 km of line for a 14.5 km walk,
+with a straight-line jump between each piece, and every distance, ETA and
+next-waypoint built on it was wrong. It is 14.54 km now, and the worst
+waypoint residual across the four days went from 1136 m to 19 m.
+
+A harder option is *spliced* into the main line where it branches and
+rejoins, so the variant is a whole day rather than the middle of one, and it
+ships as its own hike. The `without` list in `LINES` cannot be derived from
+the geometry and so is written down: waypoint `A` on day 1 is metres from
+the monastery the main route also passes, so a 150 m rule would keep it and
+anchor the harder option's notes onto a line it does not walk, while `Hotel
+Cosgaya` is 40 m from the end of the line and has to stay although the spur
+to its door does not. The ids are frozen — they key `hike:notes:<id>` and
+the saved session, so renaming one on the eve of a walk loses both. The day
+number lives in the display name instead.
+
+**Waypoint names can hide in an extension.** Garmin writes some points with
+no `<name>` at all and the label in
+`<extensions><label_text>`, which no reader is obliged to look at. Three of
+the Picos waypoints were like that — Aliva Refuge, the Fuente Dé cable car,
+Hostal Puente Deva — so `[Aliva Refuge]` in the notes anchored nothing and
+the whole day slid. The generator falls back to `label_text`, and `RENAME`
+fixes the handful whose words still differ from the printed page.
 
 **No AI API belongs in the app.** It has been considered, for matching
 route notes to the route, and turned down: the bracket-to-waypoint link is a

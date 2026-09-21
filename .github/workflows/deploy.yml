@@ -49,6 +49,13 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
 
+      # The embedded hike library is generated from tracks/*.gpx, and a
+      # hand-edited copy is how the app came to ship a 34.6 km line for a
+      # 14.5 km walk. Runs after typecheck because the script imports the
+      # core build's `simplify`, so the shipped line is the same one an
+      # import of the same file would produce.
+      - run: node scripts/build-tracks.mjs --check
+
       # Make GitHub Actions the Pages source, so the owner never has to open
       # repository settings.
       #

@@ -82,7 +82,7 @@ export interface Hike {
   name: string;
   pts: Point3[];
   wpts?: Waypoint[];
-  /** True for the five tracks shipped with the app, which cannot be deleted. */
+  /** True for the tracks shipped with the app, which cannot be deleted. */
   builtin?: boolean;
 }
 
@@ -92,7 +92,7 @@ export interface WaypointAt extends Waypoint {
 }
 
 /**
- * The five embedded Picos tracks, plus anything the walker has imported.
+ * The embedded Picos tracks, plus anything the walker has imported.
  *
  * Elevations are repaired on the way out: one of the shipped tracks begins
  * with six points recorded before the device had an altitude fix, which
