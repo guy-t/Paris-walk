@@ -30,6 +30,30 @@ apps/mobile       Capacitor shell (Android + iOS) wrapping the same build.
 *.html (root)     the original single-file apps, STILL LIVE. Do not delete.
 ```
 
+Inside the hike app, roughly in the order a walker meets them:
+
+```
+App.tsx           the shell: header, live cue, dashboard, map, sheet, panels
+useHike.ts        where the walker is — fixes, matching, session, sights
+Dashboard.tsx     the tiles, elevation profile and next-waypoint strip
+LibraryPanel.tsx  choose a hike, import GPX, prepare for offline
+NearbySheet.tsx   the bottom sheet and its tabs
+  NotesPanel      route notes, the step you are on held at the top
+  WeatherPanel    forecast along the route, and the barometer
+SettingsPanel.tsx base map, pace, units, alerts
+model.ts          the library, settings, ETA, waypoints-along-the-track
+importGpx.ts      one import path for the picker and for opened files
+notes.ts          route notes: per-hike storage, import, placement
+weather.ts        route sampling, arrival times, forecast cache
+useWeather.ts     forecast + barometer state for the weather tab
+```
+
+`apps/web/src/shared/` is what differs by platform, all feature-detected:
+`platform.ts` (native? which OS? the GPX picker's `accept`), `geolocation.ts`
+(the `PositionWatcher` seam), `openedFiles.ts` (routes opened from Files or
+an attachment), `barometer.ts` (the Android pressure sensor), `version.ts`
+(the build string).
+
 ## Migration state
 
 The three original single-file apps still serve their real URLs and are what
@@ -148,6 +172,17 @@ device's storage under `hike:notes:<id>`, and forgettable from the tab.
 Every test is written against notes invented for the purpose. Do not commit
 a transcription, paste one into an issue, or put one in a PR body.
 
+**The route-notes format is the printed page, typed out.** `# name`, an
+optional `> summary`, `## ` per variant, then one step per paragraph
+beginning with its cumulative time and distance — `0:27 2.1km  Turn R onto
+the walkway…`. A line indented two spaces is an aside rather than an
+instruction; one starting `!` (or with CAREFUL / Be aware) is a warning. A
+waypoint in square brackets anchors the step, whether it leads the sentence
+(`[1] Cross the road`) or sits inside it (`For the [Hotel del Oso]`) — but
+only when there is exactly one, so a paragraph naming two places anchors to
+neither. Transcribing is copying, which is the point: the fewer decisions
+between the page and the file, the fewer distances get mistyped.
+
 **A GPX handed out with route notes is not always one clean line.** The
 day-1 file for Potes to Cosgaya is 34.6 km for a 14.5 km walk: it holds the
 harder option and the main route end to end in one track, the harder option
@@ -158,6 +193,16 @@ waypoints, whose names match the GPX's own (`[1]`, `[A]`,
 `[Hotel del Oso]`); everything between them is interpolated, which rescales
 the printed kilometres onto measured ones. Measured against waypoints not
 used as anchors, the fit is within about 150 m.
+
+**No AI API belongs in the app.** It has been considered, for matching
+route notes to the route, and turned down: the bracket-to-waypoint link is a
+dictionary lookup and the rest is interpolation, so a model could only make
+an exact answer non-deterministic. The three hard objections outlast the
+question — an API key shipped in an APK is a published key (anyone can
+unzip it), a network call is worth nothing on the hill, and it would mean
+sending a copyrighted document with someone's mobile number in it to a third
+party. Where a model does earn its place is turning a scanned PDF into the
+notes format, which happens once per day, off the phone.
 
 **Always send `Cache-Control: no-cache` when checking the live site.** The
 Pages CDN caches 404s, so a path a deploy just added keeps answering 404.
@@ -212,10 +257,26 @@ done by hand once — the settings API needs repo-admin rights the default
 ## Not done yet
 
 - Canal and walk ports.
+- **No Android compile on pull requests.** `android.yml` is push-only, so the
+  Java in `apps/mobile` is first compiled after a merge. It has been right so
+  far; it is still the last real gap in the checks.
+- **Route notes: no variant switcher.** The notes carry a main route and a
+  harder option, and both are placed, but the app does not know which one the
+  walker chose — so on the harder option the position is matched against the
+  main line and drifts until the two rejoin.
+- **Route notes: only bracketed names anchor.** The notes also name places in
+  prose that exist as waypoints — the monastery, Congarna, Beares, San
+  Pelayo — and matching those would add anchors where there are fewest, at
+  the start of the day, which is the stretch currently extrapolated.
+- **Open with is unconfirmed on a real phone.** The intent-filters decode
+  correctly in the built APK but the app has not been seen in Android's
+  chooser; the next clue is which app the .gpx is being shared *from*.
 - Native sensors: step counter and background location. The seam is
   `PositionWatcher` in `@slownav/ui` — swap the watcher, change nothing else.
   The barometer is done: `SlowNavBarometer` in `MainActivity`, read through
   `shared/barometer.ts`.
+- iOS gets neither the barometer nor "open with": both need document types
+  and UTIs declaring in the Xcode project. Nothing breaks the iOS build.
 - The forecast is Android- and browser-wide, but the barometer half of the
   weather tab only appears where the sensor does.
 - Play Store internal track, for background APK updates. Needs a $25 account,
