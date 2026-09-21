@@ -238,6 +238,65 @@ describe("placeSteps, anchoring on places named in prose", () => {
   });
 });
 
+describe("placeSteps, when a name has several positions on the track", () => {
+  // A track that doubles back gives a waypoint more than one plausible
+  // place. The caller lists them nearest first.
+  const NOTES = `# Day
+0:00 0km  [start] Leave the square.
+
+0:10 1km  Walk on to the chapel.
+
+0:20 2km  [end] Arrive.
+`;
+
+  it("believes the nearest position when it fits", () => {
+    const placed = placeSteps(
+      parseNotes(NOTES).steps,
+      [
+        { name: "start", prog: 100 }, // nearest
+        { name: "start", prog: 8000 }, // the other pass
+        { name: "end", prog: 2100 },
+      ],
+      9000,
+    );
+    expect(placed[0]?.prog).toBe(100);
+  });
+
+  it("uses a further position when the nearest cannot fit", () => {
+    // The real case: the monastery's nearest pass is on the other variant,
+    // eleven kilometres from where this route reaches it.
+    const placed = placeSteps(
+      parseNotes(NOTES).steps,
+      [
+        { name: "start", prog: 100 },
+        { name: "end", prog: 2100 },
+        { name: "chapel", prog: 8000 }, // nearest, but out of the way
+        { name: "chapel", prog: 1050 }, // the pass this walk uses
+      ],
+      9000,
+    );
+    // The chapel is named in the middle step's last sentence, so it anchors
+    // the step after it — which must still be the arrival at 2100.
+    expect(placed[2]?.prog).toBe(2100);
+    expect(placed[1]?.prog).toBeGreaterThan(100);
+    expect(placed[1]?.prog).toBeLessThan(2100);
+  });
+
+  it("never lets an alternative displace an anchor already agreed", () => {
+    const placed = placeSteps(
+      parseNotes(NOTES).steps,
+      [
+        { name: "start", prog: 100 },
+        { name: "end", prog: 2100 },
+        { name: "end", prog: 150 }, // an alternative that would reorder
+      ],
+      9000,
+    );
+    expect(placed[0]?.prog).toBe(100);
+    expect(placed[2]?.prog).toBe(2100);
+  });
+});
+
 describe("stepAt", () => {
   const notes = parseNotes(SAMPLE);
   const placed = placeSteps(notes.steps, [{ name: "1", prog: 700 }, { name: "2", prog: 3600 }], 12000);

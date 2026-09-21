@@ -98,6 +98,69 @@ export const WALK_MATCH: MatchOptions = {
  * `cum` must be the output of `cumulative(line)` — it is passed in rather than
  * recomputed because this runs on every GPS fix.
  */
+/**
+ * Every place on the line this point could reasonably be.
+ *
+ * `project` answers "where is this, most likely" and is right for a GPS fix.
+ * It is wrong for a waypoint on a track that doubles back on itself, where
+ * "most likely" is a coin toss decided by a few metres: the Potes to
+ * Cosgaya file holds the main route and the harder option end to end, both
+ * start at the monastery, and the single Monastery Santo Toribio waypoint
+ * resolves to the harder option's pass — eleven kilometres from where the
+ * main route reaches it.
+ *
+ * So this returns each distinct pass instead: one entry per local minimum of
+ * distance to the line, nearest first, ignoring anything further off than
+ * `maxDist`. The caller decides which is meant, usually by asking which one
+ * agrees with everything else it knows.
+ */
+export function projectAll(
+  line: readonly AnyPoint[],
+  cum: readonly number[],
+  pos: AnyPoint,
+  opts: { maxDist?: number; minGap?: number; limit?: number } = {},
+): Array<{ prog: number; dist: number }> {
+  const { maxDist = 150, minGap = 500, limit = 8 } = opts;
+  if (line.length < 2) return [];
+  const cosLat = Math.cos((pos[0] * Math.PI) / 180);
+
+  // Distance to each segment, then the runs that dip below the threshold.
+  // A pass is one such run; its best point is where the line comes closest.
+  const found: Array<{ prog: number; dist: number }> = [];
+  let run: { prog: number; dist: number } | null = null;
+
+  for (let i = 0; i < line.length - 1; i++) {
+    const a = line[i]!;
+    const b = line[i + 1]!;
+    const px = (pos[1] - a[1]) * cosLat * 111320;
+    const py = (pos[0] - a[0]) * METRES_PER_LAT;
+    const bx = (b[1] - a[1]) * cosLat * 111320;
+    const by = (b[0] - a[0]) * METRES_PER_LAT;
+    const len2 = bx * bx + by * by || 1e-9;
+    const t = Math.max(0, Math.min(1, (px * bx + py * by) / len2));
+    const d = Math.hypot(px - t * bx, py - t * by);
+
+    if (d > maxDist) {
+      if (run) found.push(run);
+      run = null;
+      continue;
+    }
+    const prog = (cum[i] ?? 0) + t * Math.sqrt(len2);
+    if (!run || d < run.dist) run = { prog, dist: d };
+  }
+  if (run) found.push(run);
+
+  // A route that loops back within a few hundred metres is one pass, not
+  // two — the walker cannot tell them apart and neither can the anchoring.
+  const out: Array<{ prog: number; dist: number }> = [];
+  for (const f of found.sort((x, y) => x.dist - y.dist)) {
+    if (out.some((o) => Math.abs(o.prog - f.prog) < minGap)) continue;
+    out.push(f);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
 export function project(
   line: readonly AnyPoint[],
   cum: readonly number[],

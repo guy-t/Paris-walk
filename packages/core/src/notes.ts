@@ -172,9 +172,9 @@ export function parseNotes(text: string): RouteNotes {
  * match the harder option's waypoint fourteen kilometres away. Keeping the
  * longest mutually-consistent run drops the odd one out instead of the many.
  */
-function longestConsistent(
-  candidates: ReadonlyArray<{ noteM: number; prog: number }>,
-): Array<{ noteM: number; prog: number }> {
+function longestConsistent<T extends { noteM: number; prog: number }>(
+  candidates: readonly T[],
+): T[] {
   const sorted = [...candidates].sort((a, b) => a.noteM - b.noteM || a.prog - b.prog);
   if (sorted.length < 2) return sorted;
 
@@ -195,7 +195,7 @@ function longestConsistent(
     if (best[i]! > best[endAt]!) endAt = i;
   }
 
-  const out: Array<{ noteM: number; prog: number }> = [];
+  const out: T[] = [];
   for (let i = endAt; i !== -1; i = from[i]!) out.unshift(sorted[i]!);
   return out;
 }
@@ -300,37 +300,75 @@ export function placeSteps(
   anchors: readonly NoteAnchor[],
   trackLength: number,
 ): PlacedStep[] {
-  const byName = new Map(anchors.map((a) => [key(a.name), a.prog]));
-  const exactFor = (s: NoteStep): number | undefined =>
-    s.ref == null ? undefined : byName.get(key(s.ref));
+  // A name can appear more than once: a track that doubles back gives a
+  // waypoint several plausible positions, and which one is meant is decided
+  // here, by agreement with the rest, rather than guessed beforehand.
+  const byName = new Map<string, number[]>();
+  for (const a of anchors) {
+    const k = key(a.name);
+    byName.set(k, [...(byName.get(k) ?? []), a.prog]);
+  }
+  // Order matters: the caller lists a name's positions nearest first, and
+  // the nearest is believed unless it cannot be made to fit.
+  const progsFor = (name: string | null): number[] =>
+    name == null ? [] : (byName.get(key(name)) ?? []);
 
   const firstVariant = steps[0]?.variant;
   const variants = [...new Set(steps.map((s) => s.variant))];
   const place = new Map<NoteStep, number | null>();
+  const exactly = new Set<NoteStep>();
 
   for (const variant of variants) {
     const mine = steps.filter((s) => s.variant === variant);
 
-    // Anchor pairs in note order, monotonic in both measures: a mistyped
-    // reference must cost one step, not drag the rest of the day with it.
-    //
-    // Two kinds go in. A bracketed waypoint fixes where its own step
-    // *starts*. A place named in a step's last sentence fixes where that
-    // step *ends*, which is where the next one starts — so it is filed
-    // against the following step's distance.
-    const candidates: Array<{ noteM: number; prog: number }> = [];
+    // Every position the notes could be pinned at. A bracketed waypoint
+    // fixes where its own step starts; a place named in a step's last
+    // sentence fixes where that step ends, which is where the next one
+    // starts, so it is filed against the following step's distance.
+    type Candidate = { step: NoteStep | null; noteM: number; prog: number; rank: number };
+    const candidates: Candidate[] = [];
     for (let i = 0; i < mine.length; i++) {
       const s = mine[i]!;
-      const exact = exactFor(s);
-      if (exact != null && s.noteM != null) candidates.push({ noteM: s.noteM, prog: exact });
-
+      if (s.noteM != null) {
+        progsFor(s.ref).forEach((prog, rank) =>
+          candidates.push({ step: s, noteM: s.noteM!, prog, rank }),
+        );
+      }
       const next = mine[i + 1];
-      if (!next || next.noteM == null || exactFor(next) != null) continue;
+      if (!next || next.noteM == null || progsFor(next.ref).length) continue;
       const ends = endsAt(s.text, anchors);
-      if (ends) candidates.push({ noteM: next.noteM, prog: ends.prog });
+      if (!ends) continue;
+      progsFor(ends.name).forEach((prog, rank) =>
+        candidates.push({ step: null, noteM: next.noteM!, prog, rank }),
+      );
     }
 
-    const pairs = longestConsistent(candidates);
+    // Two stages, and the order is the whole point.
+    //
+    // First, agree on the nearest position of each name — the answer that
+    // was right before alternatives existed. Then let a further pass fill a
+    // gap, but only where it slots cleanly between anchors already agreed.
+    //
+    // Doing it in one pass instead, by taking the longest consistent run
+    // over every candidate, is worse in a way that took a measurement to
+    // see: more candidates mean more ways to build a long chain, and the
+    // longest one is not the truest. On day 1 it moved waypoint 1 more than
+    // a kilometre and stretched the walk by a fifth, while "fixing" the
+    // monastery. Consistency is not correctness.
+    const chosen = longestConsistent(candidates.filter((c) => c.rank === 0));
+    for (const c of candidates.filter((x) => x.rank > 0)) {
+      if (chosen.some((k) => k.noteM === c.noteM || k.prog === c.prog)) continue;
+      const before = chosen.filter((k) => k.noteM < c.noteM).at(-1);
+      const after = chosen.find((k) => k.noteM > c.noteM);
+      const fitsAfter = !before || c.prog > before.prog;
+      const fitsBefore = !after || c.prog < after.prog;
+      // Only ever an addition: it may not displace or reorder anything.
+      if (fitsAfter && fitsBefore) {
+        chosen.push(c);
+        chosen.sort((x, y) => x.noteM - y.noteM);
+      }
+    }
+    const pairs = chosen.map((c) => ({ noteM: c.noteM, prog: c.prog }));
 
     if (!pairs.length && variant === firstVariant) {
       const lastNote = Math.max(0, ...mine.map((s) => s.noteM ?? 0));
@@ -354,16 +392,24 @@ export function placeSteps(
       return clamp(lo.prog + (noteM - lo.noteM) * scale);
     };
 
+    const pinned = new Map<NoteStep, number>();
+    for (const c of chosen) if (c.step) pinned.set(c.step, c.prog);
+
     for (const s of mine) {
-      const exact = exactFor(s);
-      place.set(s, exact ?? (s.noteM == null ? null : fit(s.noteM)));
+      const pin = pinned.get(s);
+      if (pin != null) {
+        place.set(s, pin);
+        exactly.add(s);
+      } else {
+        place.set(s, s.noteM == null ? null : fit(s.noteM));
+      }
     }
   }
 
   return steps.map((s) => ({
     ...s,
     prog: place.get(s) ?? null,
-    exact: exactFor(s) != null,
+    exact: exactly.has(s),
   }));
 }
 

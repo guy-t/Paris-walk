@@ -22,7 +22,7 @@ packages/core     geometry, map-matching, the GPS tracker, sessions, GPX,
                   sun times, Overpass and Wikipedia clients, offline tiles,
                   the forecast client, the barometric maths and the route-notes parser.
                   No React, no Leaflet, no DOM beyond the browser APIs that
-                  are the point. 285 unit tests.
+                  are the point. 296 unit tests.
 packages/ui       MapView, ElevationProfile, Sheet, StatTile, Toast, and the
                   geolocation / wake-lock / service-worker hooks.
 apps/web          one Vite app, one HTML entry per guide, two build targets.
@@ -129,7 +129,8 @@ like one built without the change, and the phone can now be asked.
 the picker is left unfiltered on Android and iOS (`gpxAccept`) and what was
 picked is checked by parsing it. The intent-filters list every one of those
 types for the same reason, `octet-stream` included, which is why the app also
-appears in "Open with" for other unrecognised files.
+appears in "Open with" for other unrecognised files. Confirmed working on a
+real phone — tapping a .gpx and choosing the app imports the route.
 
 **Capacitor delivers the launching intent twice.** `BridgeActivity.load()`
 calls `onNewIntent(getIntent())` from inside `super.onCreate()`, so an
@@ -185,12 +186,25 @@ between the page and the file, the fewer distances get mistyped.
 
 **A waypoint's position on a self-overlapping track is ambiguous.** Because
 the day-1 file holds both variants end to end, and both start at the
-monastery, the single `Monastery Santo Toribio` waypoint projects to 7.74 km
-— the harder option's pass — not to the 21.5 km where the main route reaches
-it. So an anchor can be confidently, badly wrong. `placeSteps` keeps the
-*longest mutually-consistent* set of anchors rather than taking them greedily
-in order: a wrong one is dropped instead of dragging the day with it, and a
-wrong one arriving first does not discard the good ones behind it.
+monastery, the single `Monastery Santo Toribio` waypoint is 33 m from the
+track at 7.74 km and 51 m from it at 21.60 km. The nearer is the harder
+option's pass; the main route reaches it at the further one. So an anchor
+can be confidently, badly wrong.
+
+Two mechanisms, and the order between them matters. `projectAll` offers
+every pass rather than only the nearest. `placeSteps` then agrees on the
+*nearest* position of each name first — keeping the longest mutually
+consistent run, so a wrong anchor is dropped instead of dragging the day —
+and only afterwards lets a further pass fill a gap, and only where it slots
+between anchors already agreed. It can add, never displace.
+
+**Consistency is not correctness**, which took a measurement to see. Taking
+the longest consistent run over *all* passes at once looks more principled
+and is worse: more candidates mean more ways to build a long chain, and the
+longest is not the truest. Tried that way, day 1 moved waypoint `1` by more
+than a kilometre and stretched the walk by a fifth, while "fixing" the
+monastery. Any future change here needs measuring against the real file, not
+reasoning about.
 
 **A GPX handed out with route notes is not always one clean line.** The
 day-1 file for Potes to Cosgaya is 34.6 km for a 14.5 km walk: it holds the
@@ -225,7 +239,7 @@ Pages CDN caches 404s, so a path a deploy just added keeps answering 404.
 ```bash
 pnpm install
 pnpm typecheck          # tsc --build across all projects
-pnpm test               # vitest, 285 tests
+pnpm test               # vitest, 296 tests
 pnpm build              # web build for Pages
 pnpm --filter @slownav/web build:native   # payload for the APK
 pnpm --filter @slownav/web dev            # local dev server
@@ -269,21 +283,18 @@ done by hand once — the settings API needs repo-admin rights the default
 ## Not done yet
 
 - Canal and walk ports.
-- **The first kilometres of a day are still extrapolated.** Prose anchoring
-  fixed the middle of day 1 but not its start, because the waypoints there
-  (the monastery above all) project onto the harder option's pass and are
-  rejected as inconsistent. The fix is to offer each waypoint's *several*
-  plausible positions on a self-overlapping track — every local minimum
-  within ~150 m of the line, not just the global nearest — and let the
-  consistency filter choose. That needs a `projectAll` in `match.ts`.
+- **The first 675 m of day 1 are extrapolated**, backwards from waypoint
+  `1`, because nothing in Potes anchors: `Casa Cayo` is named mid-sentence
+  (a sighting, not an arrival) and the supermarket only in an aside. The
+  error is small — the scale is well determined by the anchors after it —
+  and `projectAll` did not change it, since every position it recovers is
+  further along. Worth revisiting only if a day turns up whose first
+  kilometres are visibly wrong.
 - **A variant is chosen, not detected.** The switcher in the Route notes tab
   sets which line the walker is on. The app could notice that the position
   matches the other variant's stretch and offer to switch, but being asked
   "are you on the hard one?" halfway up a muddy path is worse than choosing
   at the signpost.
-- **Open with is unconfirmed on a real phone.** The intent-filters decode
-  correctly in the built APK but the app has not been seen in Android's
-  chooser; the next clue is which app the .gpx is being shared *from*.
 - Native sensors: step counter and background location. The seam is
   `PositionWatcher` in `@slownav/ui` — swap the watcher, change nothing else.
   The barometer is done: `SlowNavBarometer` in `MainActivity`, read through

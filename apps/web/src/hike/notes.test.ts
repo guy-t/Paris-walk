@@ -8,7 +8,7 @@ import {
   placeNotes,
   saveVariant,
 } from "./notes.js";
-import type { WaypointAt } from "./model.js";
+import { processTrack, type Point3, type Waypoint } from "@slownav/core";
 
 const NOTES = `# Vale to Hilltop
 > 12 km
@@ -65,18 +65,42 @@ describe("importNotes", () => {
 describe("placeNotes", () => {
   beforeEach(() => localStorage.clear());
 
-  const waypoints = [{ name: "1", prog: 700, desc: "", lat: 0, lon: 0 }] as WaypointAt[];
+  /** A straight kilometre east, with one waypoint 700 m along it. */
+  const track = () => {
+    const pts: Point3[] = [];
+    for (let i = 0; i <= 120; i++) pts.push([43.15, -4.75 + i * 0.000123, 300]);
+    return processTrack(pts, 5);
+  };
+  const at = (t: ReturnType<typeof track>, metres: number): Waypoint => {
+    let i = 0;
+    while (i < t.cum.length - 1 && t.cum[i + 1]! < metres) i++;
+    return { name: "1", desc: "", lat: t.pts[i]![0], lon: t.pts[i]![1] };
+  };
 
   it("places a step exactly on the waypoint it names", () => {
     importNotes("h1", NOTES);
-    const placed = placeNotes(loadNotes("h1"), waypoints, 12000);
+    const t = track();
+    const placed = placeNotes(loadNotes("h1"), t, [at(t, 700)]);
     const one = placed.find((s) => s.ref === "1")!;
-    expect(one.prog).toBe(700);
     expect(one.exact).toBe(true);
+    expect(one.prog).toBeGreaterThan(650);
+    expect(one.prog).toBeLessThan(760);
   });
 
   it("has nothing to place when no notes are imported", () => {
-    expect(placeNotes(null, waypoints, 12000)).toEqual([]);
+    expect(placeNotes(null, track(), [])).toEqual([]);
+  });
+
+  it("has nothing to place before a track is processed", () => {
+    importNotes("h1", NOTES);
+    expect(placeNotes(loadNotes("h1"), null, [])).toEqual([]);
+  });
+
+  it("ignores a waypoint nowhere near the line", () => {
+    importNotes("h1", NOTES);
+    const t = track();
+    const far: Waypoint = { name: "1", desc: "", lat: 44.9, lon: -3.0 };
+    expect(placeNotes(loadNotes("h1"), t, [far]).find((s) => s.ref === "1")?.exact).toBe(false);
   });
 });
 

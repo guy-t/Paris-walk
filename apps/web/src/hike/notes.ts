@@ -8,8 +8,17 @@
  * line of them; the parser is tested against notes written for the purpose.
  */
 
-import { parseNotes, placeSteps, store, type RouteNotes, type PlacedStep } from "@slownav/core";
-import type { WaypointAt } from "./model.js";
+import {
+  parseNotes,
+  placeSteps,
+  projectAll,
+  store,
+  type NoteAnchor,
+  type PlacedStep,
+  type ProcessedTrack,
+  type RouteNotes,
+  type Waypoint,
+} from "@slownav/core";
 
 export interface StoredNotes extends RouteNotes {
   importedAt: number;
@@ -92,16 +101,28 @@ export function importNotes(hikeId: string, text: string): ImportResult {
   };
 }
 
-/** Put the notes on the line, using the waypoints the app has already placed. */
+/**
+ * Put the notes on the line.
+ *
+ * Each waypoint offers *every* place it could be, not just the nearest one.
+ * On a track that doubles back — and the file for day 1 holds both variants
+ * end to end — the nearest is a coin toss decided by a few metres, and it
+ * picked the wrong pass for the monastery by eleven kilometres. Handing the
+ * alternatives to `placeSteps` lets the anchor that agrees with the rest of
+ * the day win, instead of the one that happened to be closest.
+ */
 export function placeNotes(
   notes: StoredNotes | null,
-  waypoints: readonly WaypointAt[],
-  trackLength: number,
+  track: ProcessedTrack | null,
+  wpts: readonly Waypoint[],
 ): PlacedStep[] {
-  if (!notes) return [];
-  return placeSteps(
-    notes.steps,
-    waypoints.map((w) => ({ name: w.name, prog: w.prog })),
-    trackLength,
-  );
+  if (!notes || !track) return [];
+  const anchors: NoteAnchor[] = [];
+  for (const w of wpts) {
+    if (!w.name) continue;
+    for (const hit of projectAll(track.pts, track.cum, [w.lat, w.lon], { maxDist: 150 })) {
+      anchors.push({ name: w.name, prog: hit.prog });
+    }
+  }
+  return placeSteps(notes.steps, anchors, track.length);
 }

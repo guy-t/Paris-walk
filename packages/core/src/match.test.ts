@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { cumulative, type LatLon } from "./geo.js";
-import { HIKE_MATCH, WALK_MATCH, interp, passesNear, positionAt, project, snap } from "./match.js";
+import { cumulative, haversine, type LatLon } from "./geo.js";
+import {
+  HIKE_MATCH,
+  WALK_MATCH,
+  interp,
+  passesNear,
+  positionAt,
+  project,
+  projectAll,
+  snap,
+} from "./match.js";
 
 /**
  * A straight line heading due east from a point in Paris, `n` points at
@@ -140,5 +149,63 @@ describe("passesNear", () => {
   it("finds nothing when the line stays away", () => {
     const line = eastLine(11);
     expect(passesNear(line, cumulative(line), [48.86, 2.35], 60)).toHaveLength(0);
+  });
+});
+
+describe("projectAll", () => {
+  /** A line out and back: every point near it is passed twice. */
+  const outAndBack = () => {
+    const pts: Array<[number, number]> = [];
+    for (let i = 0; i <= 100; i++) pts.push([43.15, -4.75 + i * 0.0005]);
+    for (let i = 99; i >= 0; i--) pts.push([43.1504, -4.75 + i * 0.0005]);
+    return pts;
+  };
+
+  const cumOf = (pts: ReadonlyArray<[number, number]>) => {
+    const c = [0];
+    for (let i = 1; i < pts.length; i++) c.push(c[i - 1]! + haversine(pts[i - 1]!, pts[i]!));
+    return c;
+  };
+
+  it("finds both passes of a line that doubles back", () => {
+    const pts = outAndBack();
+    const hits = projectAll(pts, cumOf(pts), [43.1502, -4.7255]);
+    expect(hits.length).toBe(2);
+    expect(Math.abs(hits[0]!.prog - hits[1]!.prog)).toBeGreaterThan(1000);
+  });
+
+  it("returns the nearest pass first", () => {
+    const pts = outAndBack();
+    // Closer to the outward leg than the return.
+    const hits = projectAll(pts, cumOf(pts), [43.1501, -4.7255]);
+    expect(hits[0]!.dist).toBeLessThan(hits[1]!.dist);
+  });
+
+  it("agrees with project about the best one", () => {
+    const pts = outAndBack();
+    const cum = cumOf(pts);
+    const pos: [number, number] = [43.1501, -4.7255];
+    const best = project(pts, cum, pos, { global: true })!;
+    expect(projectAll(pts, cum, pos)[0]!.prog).toBeCloseTo(best.prog, 0);
+  });
+
+  it("does not split one pass into several", () => {
+    // A straight line past the point is a single approach, however many
+    // segments it is made of.
+    const pts: Array<[number, number]> = [];
+    for (let i = 0; i <= 200; i++) pts.push([43.15, -4.75 + i * 0.0002]);
+    expect(projectAll(pts, cumOf(pts), [43.1501, -4.73])).toHaveLength(1);
+  });
+
+  it("says nothing about a point nowhere near the line", () => {
+    const pts = outAndBack();
+    expect(projectAll(pts, cumOf(pts), [44.5, -3.0])).toEqual([]);
+  });
+
+  it("keeps a far-off pass out when a threshold is given", () => {
+    const pts = outAndBack();
+    // The two legs are ~45 m apart; a tight threshold keeps only the near one.
+    const hits = projectAll(pts, cumOf(pts), [43.15, -4.7255], { maxDist: 20 });
+    expect(hits).toHaveLength(1);
   });
 });
