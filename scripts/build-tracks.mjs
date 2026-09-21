@@ -42,6 +42,13 @@ const OUT = join(root, "apps/web/src/hike/tracks.json");
  *
  * `ids` are frozen: they key the walker's saved notes (`hike:notes:<id>`)
  * and sessions, so renaming one on the eve of a walk loses both.
+ *
+ * `variantOf` names the main line an option forks from. It is what makes the
+ * two one day in the app: the notes, the chosen variant, the session and the
+ * history all hang off that id, so swapping at the signpost costs one tap
+ * and loses nothing. The order here is the order the notes print their
+ * variants in — main route first — because that is how a variant is matched
+ * to the line it is walked on.
  */
 const LINES = [
   {
@@ -58,6 +65,7 @@ const LINES = [
   {
     id: "5_Potes_to_Cosgaya_harder",
     name: "Day 1 Potes to Cosgaya (harder option)",
+    variantOf: "5_Potes_to_Cosgaya",
     file: "5_Potes_to_Cosgaya.gpx",
     parts: ["5 SPINE Potes to Cosgaya", "5 END Oso"],
     splice: "5 OPTION Harder option",
@@ -76,6 +84,7 @@ const LINES = [
   {
     id: "6a_Cosgaya_to_Fuente_De_harder",
     name: "Day 2 Cosgaya to Fuente Dé (harder option)",
+    variantOf: "6a_Cosgaya_to_Fuente_De",
     file: "6a_Cosgaya_to_Fuente_De.gpx",
     parts: ["6a SPINE Cosgaya to Fuente"],
     splice: "6a OPTION Cosgaya to Espinama",
@@ -171,12 +180,26 @@ function build(spec, xml) {
   return {
     id: spec.id,
     name: spec.name,
+    ...(spec.variantOf ? { variantOf: spec.variantOf } : {}),
     // Simplified and rounded exactly as `parseGPX` does on import, so a file
     // the walker imports themselves and the copy shipped here are the same
     // line rather than two that disagree by centimetres.
     pts: simplify(pts, 3).map((p) => [+p[0].toFixed(6), +p[1].toFixed(6), Math.round(p[2])]),
     wpts: readWaypoints(xml).filter((w) => w.name && !without.has(w.name)),
   };
+}
+
+// An option must follow the line it forks from, because a notes variant is
+// matched to a line by position (see `lineForVariant`): the main route is
+// printed first, so it has to be listed first. Reordering LINES would
+// otherwise swap the two lines silently, and the only symptom would be the
+// wrong instructions on the hill.
+const seen = new Set();
+for (const l of LINES) {
+  if (l.variantOf && !seen.has(l.variantOf)) {
+    throw new Error(`${l.id}: variantOf "${l.variantOf}" must be listed before it`);
+  }
+  seen.add(l.id);
 }
 
 const known = new Set(LINES.map((l) => l.file));

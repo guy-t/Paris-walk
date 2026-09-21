@@ -84,6 +84,28 @@ export interface Hike {
   wpts?: Waypoint[];
   /** True for the tracks shipped with the app, which cannot be deleted. */
   builtin?: boolean;
+  /**
+   * The day this is another line of, when it is not the main one.
+   *
+   * A day that offers a harder option ships as two hikes, because one GPX
+   * document is one line to the map-matcher and stringing both together
+   * makes every distance wrong. But it is still one day: one set of route
+   * notes, one session, one entry in the history. So everything a walker
+   * accumulates hangs off `dayId`, not off the line they happen to be on,
+   * and swapping at the signpost keeps it.
+   */
+  variantOf?: string;
+}
+
+/**
+ * The id a day's own storage hangs off — notes, variant, session, history.
+ *
+ * Always the main line, even while walking an option. Per-line things (the
+ * tile cache, the sights along it, the forecast sampled along it) key off
+ * `hike.id` instead, because those really do differ between the two lines.
+ */
+export function dayId(h: Hike | null | undefined): string {
+  return h ? (h.variantOf ?? h.id) : "";
 }
 
 /** A waypoint with its distance along the track worked out. */
@@ -113,6 +135,19 @@ export const library = {
   },
   get(id: string): Hike | undefined {
     return this.list().find((h) => h.id === id);
+  },
+  /**
+   * Every line of one day: the main route first, then its options in order.
+   *
+   * Takes any line of the day, so it answers the same from either side of a
+   * swap.
+   */
+  family(id: string): Hike[] {
+    const all = this.list();
+    const here = all.find((h) => h.id === id);
+    if (!here) return [];
+    const day = dayId(here);
+    return all.filter((h) => h.id === day || h.variantOf === day);
   },
   /**
    * Add a hike, replacing one with the same id.
@@ -155,6 +190,29 @@ export function waypointsAlong(track: ProcessedTrack, wpts: readonly Waypoint[])
       return { ...w, name: w.name || `Waypoint ${i + 1}`, prog: p.prog };
     })
     .filter((w): w is WaypointAt => w !== null);
+}
+
+/**
+ * Which line of the day a set of notes' variant is walked on.
+ *
+ * By position, not by name: the variant ids come from the headings in the
+ * file the walker imported (`## Harder option` becomes `harder-option`), and
+ * the next day's notes may word it differently. The printed notes always give
+ * the main route first and each alternative after it, which is the order
+ * `library.family` returns, so the *n*th variant is the *n*th line.
+ *
+ * Null when the day has no line for that variant — notes with three sections
+ * against a day that ships two. Those steps stay where they are rather than
+ * being drawn onto a line they are not describing.
+ */
+export function lineForVariant(
+  family: readonly Hike[],
+  variantIds: readonly string[],
+  variantId: string,
+): string | null {
+  const i = variantIds.indexOf(variantId);
+  if (i < 0) return null;
+  return family[i]?.id ?? null;
 }
 
 export function prepare(h: Hike, paceKmh: number): ProcessedTrack {

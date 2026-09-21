@@ -26,7 +26,7 @@ import {
   type TileSource,
 } from "@slownav/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { APP, library, type Hike, type HikeSettings } from "./model.js";
+import { APP, dayId, library, type Hike, type HikeSettings } from "./model.js";
 import { gpxAccept } from "../shared/platform.js";
 import { importGpxFiles, importMessage } from "./importGpx.js";
 import { refreshForecast } from "./weather.js";
@@ -221,14 +221,20 @@ export function LibraryPanel({
       <div className="panel-body">
         {hikes.map((h) => {
           const track = tracks.get(h.id)!;
-          const recs = records(APP, h.id);
+          // The history and the session belong to the day, so a harder
+          // option shows the same walk as the main line it forks from
+          // rather than pretending to be a fresh route.
+          const recs = records(APP, dayId(h));
           const best = recs.length ? recs[recs.length - 1] : null;
-          const sess = store.get<Session>(`hike:session:${h.id}`);
+          const sess = store.get<Session>(`hike:session:${dayId(h)}`);
           const off = offline[h.id];
           const ready = off ? off.have >= off.total * 0.95 : false;
 
           return (
-            <div className={`hike ${h.id === currentId ? "current" : ""}`} key={h.id}>
+            <div
+              className={`hike ${h.id === currentId ? "current" : ""}${h.variantOf ? " option" : ""}`}
+              key={h.id}
+            >
               <div className="t">{h.name}</div>
               <div className="stats">
                 {fmt.km(track.length)} · ↑ {fmt.alt(track.up)} · ↓ {fmt.alt(track.down)} ·{" "}
@@ -281,7 +287,12 @@ export function LibraryPanel({
                   </button>
                 ) : (
                   <button className="primary" onClick={() => onOpen(h.id)}>
-                    Open
+                    {/* Same day, other line: it keeps the notes and the
+                        session, so calling it "Open" would undersell it and
+                        invite the worry that the walk so far is lost. */}
+                    {currentId && dayId(h) === dayId(hikes.find((x) => x.id === currentId))
+                      ? "Switch to this line"
+                      : "Open"}
                   </button>
                 )}
                 <button disabled={busy === h.id} onClick={() => void prepare(h)}>

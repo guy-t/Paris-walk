@@ -41,7 +41,9 @@ import { NearbySheet, tabForSight, type NearbyTab } from "./NearbySheet.js";
 import { SettingsPanel } from "./SettingsPanel.js";
 import {
   APP,
+  dayId,
   library,
+  lineForVariant,
   loadSettings,
   PREFERRED_PROVIDERS,
   saveSettings,
@@ -255,7 +257,7 @@ export function App() {
       return;
     }
     const rec = toRecord(state.session);
-    addRecord(APP, state.hike.id, rec);
+    addRecord(APP, dayId(state.hike), rec);
     // Clear before stopping: endTracking saves, and it must find nothing.
     hike.clearSession();
     gps.stop();
@@ -335,10 +337,26 @@ export function App() {
   const [notes, setNotes] = useState<StoredNotes | null>(null);
   const [variant, setVariant] = useState("main");
   const notesInput = useRef<HTMLInputElement>(null);
+  // Keyed to the day, not to the line: a day's harder option is a second
+  // hike, and importing the same notes twice to walk it would be absurd.
+  const day = dayId(state.hike);
   useEffect(() => {
-    const loaded = state.hike ? loadNotes(state.hike.id) : null;
+    const open = state.hike;
+    const loaded = open ? loadNotes(dayId(open)) : null;
     setNotes(loaded);
-    setVariant(state.hike ? loadVariant(state.hike.id, loaded) : "main");
+    if (!open) {
+      setVariant("main");
+      return;
+    }
+    // The line decides which variant is shown, when it can say: opening the
+    // harder option from the library is as much a choice as tapping the
+    // pill, and reading out the main route's instructions while standing on
+    // the other line would be a lie the walker has no way to spot.
+    const mine = library.family(open.id).findIndex((h) => h.id === open.id);
+    const byLine = loaded?.variants[mine]?.id;
+    const chosen = byLine ?? loadVariant(dayId(open), loaded);
+    setVariant(chosen);
+    if (byLine) saveVariant(dayId(open), byLine);
   }, [state.hike]);
 
   const noteSteps = useMemo(
@@ -350,6 +368,44 @@ export function App() {
     [noteSteps, variant, state.progress],
   );
   const currentIndex = cue.current ? noteSteps.indexOf(cue.current) : -1;
+
+  /**
+   * Choose which line of the day the walker is on.
+   *
+   * Both a notes choice and a route change. A day that forks ships as two
+   * hikes — one GPX document is one line to the map-matcher — so the pill in
+   * the Route notes tab has to open the other one. The notes, the choice and
+   * the session all hang off the day, so nothing is re-imported and nothing
+   * recorded is lost — and `openHike` sees that this is a swap rather than a
+   * resume, so the tracker finds the walker on the new line instead of
+   * trusting a distance measured along the old one.
+   *
+   * A day with no separate line for that variant (notes with three sections,
+   * a day that ships two) just changes which instructions are shown, which is
+   * what this did before there was a second line at all.
+   */
+  const chooseVariant = useCallback(
+    (id: string) => {
+      setVariant(id);
+      if (day) saveVariant(day, id);
+      const current = state.hike;
+      if (!current || !notes) return;
+      const line = lineForVariant(
+        library.family(current.id),
+        notes.variants.map((v) => v.id),
+        id,
+      );
+      if (!line || line === current.id) return;
+      const opened = hike.openHike(line);
+      if (!opened) return;
+      setFitNonce((n) => n + 1);
+      show(`Now on ${opened.hike.name}.`);
+      if (!store.get(`hike:sights:${line}`) && navigator.onLine) {
+        void hike.loadSights(opened.hike, opened.track);
+      }
+    },
+    [day, notes, state.hike, hike, show],
+  );
 
   // The pace the ETA has settled on, so the forecast and the arrival time on
   // the dashboard never disagree about when the walker reaches the col.
@@ -632,14 +688,11 @@ export function App() {
           currentIndex,
           fmt,
           variant,
-          onVariant: (id: string) => {
-            setVariant(id);
-            if (state.hike) saveVariant(state.hike.id, id);
-          },
+          onVariant: chooseVariant,
           onImport: () => notesInput.current?.click(),
           onForget: () => {
-            if (!state.hike) return;
-            clearNotes(state.hike.id);
+            if (!day) return;
+            clearNotes(day);
             setNotes(null);
             show("Route notes removed from this phone.");
           },
@@ -659,14 +712,13 @@ export function App() {
         onChange={(e) => {
           const file = e.target.files?.[0];
           e.target.value = "";
-          if (!file || !state.hike) return;
-          const hikeId = state.hike.id;
+          if (!file || !day) return;
           void file.text().then((text) => {
-            const result = importNotes(hikeId, text);
+            const result = importNotes(day, text);
             show(result.message);
             if (!result.ok) return;
             setNotes(result.notes);
-            setVariant(loadVariant(hikeId, result.notes));
+            setVariant(loadVariant(day, result.notes));
           });
         }}
       />
