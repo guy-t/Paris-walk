@@ -342,8 +342,8 @@ export function App() {
   }, [state.hike]);
 
   const noteSteps = useMemo(
-    () => placeNotes(notes, state.waypoints, state.track?.length ?? 0),
-    [notes, state.waypoints, state.track],
+    () => placeNotes(notes, state.track, state.hike?.wpts ?? []),
+    [notes, state.track, state.hike],
   );
   const cue = useMemo(
     () => stepAt(noteSteps.filter((s) => s.variant === variant), state.progress),
