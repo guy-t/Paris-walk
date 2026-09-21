@@ -166,6 +166,78 @@ describe("placeSteps", () => {
   });
 });
 
+describe("placeSteps, anchoring on places named in prose", () => {
+  // These notes bracket the turns and write the places into the sentence.
+  const NOTES = `# Day
+0:00 0km  Leave the square and cross the bridge, keeping the gallery of Casa Cayo in view across the river. Follow the lane for 400m to reach the hamlet of Congarna.
+
+0:10 900m  At the crossroads take the third right and descend for 350m to reach Camaleño.
+
+0:20 1.6km  Continue between the walls to the shrine.
+`;
+
+  it("anchors the next step on a place the step ends at", () => {
+    const placed = placeSteps(parseNotes(NOTES).steps, [{ name: "Congarna", prog: 1000 }], 5000);
+    expect(placed[1]?.prog).toBe(1000);
+  });
+
+  it("ignores a place merely seen along the way", () => {
+    // "keeping the gallery of Casa Cayo in view" is not an instruction to
+    // arrive there, and it is not in the step's last sentence.
+    const placed = placeSteps(
+      parseNotes(NOTES).steps,
+      [{ name: "Casa Cayo", prog: 4000 }],
+      5000,
+    );
+    expect(placed[1]?.prog).not.toBe(4000);
+  });
+
+  it("matches across accents and the little words of a sentence", () => {
+    // Notes write "Camaleño"; the GPX says "Camaleno".
+    const placed = placeSteps(parseNotes(NOTES).steps, [{ name: "Camaleno", prog: 2000 }], 5000);
+    expect(placed[2]?.prog).toBe(2000);
+  });
+
+  it("does not anchor on a bare number or letter found in prose", () => {
+    const placed = placeSteps(parseNotes(NOTES).steps, [{ name: "A", prog: 4500 }], 5000);
+    expect(placed[1]?.prog).not.toBe(4500);
+  });
+
+  it("keeps the many consistent anchors and drops the odd one out", () => {
+    // The real case: one waypoint named for a village the route passes on
+    // both variants, matching a point kilometres from where the walk is.
+    const placed = placeSteps(
+      parseNotes(NOTES).steps,
+      [
+        { name: "Congarna", prog: 1000 },
+        { name: "Camaleno", prog: 90 }, // the other variant's pass
+      ],
+      5000,
+    );
+    expect(placed[1]?.prog).toBe(1000);
+    expect(placed[2]?.prog).toBeGreaterThan(1000);
+  });
+
+  it("is not thrown by a wrong anchor arriving first", () => {
+    // Greedy acceptance would take the early wrong one and drop both good
+    // ones after it; keeping the longest consistent run does the opposite.
+    const notes = parseNotes(
+      "# D\n\n0:00 0km  Walk to Alpha.\n\n0:10 1km  Walk to Beta.\n\n0:20 2km  Walk to Gamma.\n\n0:30 3km  Stop.\n",
+    );
+    const placed = placeSteps(
+      notes.steps,
+      [
+        { name: "Alpha", prog: 4000 }, // wrong: would go backwards
+        { name: "Beta", prog: 1000 },
+        { name: "Gamma", prog: 2000 },
+      ],
+      5000,
+    );
+    expect(placed[2]?.prog).toBe(1000);
+    expect(placed[3]?.prog).toBe(2000);
+  });
+});
+
 describe("stepAt", () => {
   const notes = parseNotes(SAMPLE);
   const placed = placeSteps(notes.steps, [{ name: "1", prog: 700 }, { name: "2", prog: 3600 }], 12000);

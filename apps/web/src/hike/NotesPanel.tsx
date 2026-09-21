@@ -19,6 +19,9 @@ export interface NotesPanelProps {
   /** The step the walker is in, if any — rendered large at the top. */
   currentIndex: number;
   fmt: Formatter;
+  /** Which variant the walker is on, and how to change it. */
+  variant: string;
+  onVariant: (id: string) => void;
   onImport: () => void;
   onForget: () => void;
 }
@@ -29,6 +32,8 @@ export function NotesPanel({
   progress,
   currentIndex,
   fmt,
+  variant,
+  onVariant,
   onImport,
   onForget,
 }: NotesPanelProps) {
@@ -59,11 +64,28 @@ export function NotesPanel({
     );
   }
 
+  const shown = steps.filter((s) => s.variant === variant);
+
   return (
     <div className="notes">
-      {steps.map((s, i) => {
+      {/* Only worth showing when the day actually forks. */}
+      {notes.variants.length > 1 && (
+        <div className="variants" role="group" aria-label="Which route are you walking?">
+          {notes.variants.map((v) => (
+            <button
+              key={v.id}
+              className={v.id === variant ? "on" : ""}
+              aria-pressed={v.id === variant}
+              onClick={() => onVariant(v.id)}
+            >
+              {v.name}
+            </button>
+          ))}
+        </div>
+      )}
+      {shown.map((s, i) => {
         const ahead = s.prog == null ? null : s.prog - progress;
-        const current = i === currentIndex;
+        const current = steps.indexOf(s) === currentIndex;
         return (
           <div
             key={`${s.variant}-${i}`}

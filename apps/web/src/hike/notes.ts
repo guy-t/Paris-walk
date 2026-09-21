@@ -29,6 +29,28 @@ export function saveNotes(hikeId: string, notes: RouteNotes): boolean {
 
 export function clearNotes(hikeId: string): void {
   store.del(key(hikeId));
+  store.del(variantKey(hikeId));
+}
+
+const variantKey = (hikeId: string) => `hike:variant:${hikeId}`;
+
+/**
+ * Which line of the walk the walker took.
+ *
+ * A day's notes can offer a choice — a track-based main route and a harder
+ * one on narrow paths, separate for several kilometres before rejoining.
+ * Both are placed, but only the walker knows which they are on, and until
+ * they say, the app reads instructions from the wrong line.
+ */
+export function loadVariant(hikeId: string, notes: StoredNotes | null): string {
+  const stored = store.get<string>(variantKey(hikeId));
+  const known = notes?.variants.map((v) => v.id) ?? [];
+  if (stored && known.includes(stored)) return stored;
+  return known[0] ?? "main";
+}
+
+export function saveVariant(hikeId: string, variant: string): void {
+  store.set(variantKey(hikeId), variant);
 }
 
 export interface ImportResult {

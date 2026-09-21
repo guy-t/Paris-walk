@@ -54,7 +54,15 @@ import { onOpenedFiles } from "../shared/openedFiles.js";
 import { importGpxFiles, importMessage } from "./importGpx.js";
 import { useHike } from "./useHike.js";
 import { useWeather } from "./useWeather.js";
-import { importNotes, clearNotes, loadNotes, placeNotes, type StoredNotes } from "./notes.js";
+import {
+  importNotes,
+  clearNotes,
+  loadNotes,
+  loadVariant,
+  placeNotes,
+  saveVariant,
+  type StoredNotes,
+} from "./notes.js";
 import "./hike.css";
 
 /** Keeps elapsed time and the moving average ticking between GPS fixes. */
@@ -325,16 +333,22 @@ export function App() {
   // line using the waypoints the app has already projected, so an
   // instruction that names one sits exactly on it.
   const [notes, setNotes] = useState<StoredNotes | null>(null);
+  const [variant, setVariant] = useState("main");
   const notesInput = useRef<HTMLInputElement>(null);
   useEffect(() => {
-    setNotes(state.hike ? loadNotes(state.hike.id) : null);
+    const loaded = state.hike ? loadNotes(state.hike.id) : null;
+    setNotes(loaded);
+    setVariant(state.hike ? loadVariant(state.hike.id, loaded) : "main");
   }, [state.hike]);
 
   const noteSteps = useMemo(
     () => placeNotes(notes, state.waypoints, state.track?.length ?? 0),
     [notes, state.waypoints, state.track],
   );
-  const cue = useMemo(() => stepAt(noteSteps, state.progress), [noteSteps, state.progress]);
+  const cue = useMemo(
+    () => stepAt(noteSteps.filter((s) => s.variant === variant), state.progress),
+    [noteSteps, variant, state.progress],
+  );
   const currentIndex = cue.current ? noteSteps.indexOf(cue.current) : -1;
 
   // The pace the ETA has settled on, so the forecast and the arrival time on
@@ -617,6 +631,11 @@ export function App() {
           progress: state.progress,
           currentIndex,
           fmt,
+          variant,
+          onVariant: (id: string) => {
+            setVariant(id);
+            if (state.hike) saveVariant(state.hike.id, id);
+          },
           onImport: () => notesInput.current?.click(),
           onForget: () => {
             if (!state.hike) return;
@@ -645,7 +664,9 @@ export function App() {
           void file.text().then((text) => {
             const result = importNotes(hikeId, text);
             show(result.message);
-            if (result.ok) setNotes(result.notes);
+            if (!result.ok) return;
+            setNotes(result.notes);
+            setVariant(loadVariant(hikeId, result.notes));
           });
         }}
       />
