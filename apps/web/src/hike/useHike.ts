@@ -25,7 +25,17 @@ import {
   type Session,
 } from "@slownav/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { APP, eta, library, prepare, waypointsAlong, type Hike, type HikeSettings, type WaypointAt } from "./model.js";
+import {
+  APP,
+  dayId,
+  eta,
+  library,
+  prepare,
+  waypointsAlong,
+  type Hike,
+  type HikeSettings,
+  type WaypointAt,
+} from "./model.js";
 import { buildSights, fetchSights, fetchWiki, type Sight } from "./sights.js";
 
 export type SightsStatus = "idle" | "loading" | "ok" | "error";
@@ -93,16 +103,29 @@ export function useHike(settings: HikeSettings) {
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
 
-  /** Open a hike: measure it, restore any session, and start loading sights. */
+  // A mirror of state, for callbacks that must stay stable across renders.
+  const stateRef = useRef(state);
+  stateRef.current = state;
+
+  /** Open a hike: measure it, restore the day's session, start loading sights. */
   const openHike = useCallback(
     (id: string) => {
       const hike = library.get(id);
       if (!hike) return;
+
+      // Flush the outgoing session before anything replaces it. Saves are
+      // otherwise every 20 seconds, so switching lines mid-walk dropped
+      // whatever had accrued since the last one.
+      const leaving = stateRef.current.hike;
+      if (leaving && sessionRef.current) {
+        persistSession(APP, dayId(leaving), sessionRef.current);
+      }
+
       const track = prepare(hike, settingsRef.current.pace);
       const waypoints = waypointsAlong(track, hike.wpts ?? []);
       store.set("hike:current", id);
 
-      const session = loadSession(APP, id);
+      const session = loadSession(APP, dayId(hike));
       const sights = store.get<Sight[]>(`hike:sights:${id}`);
       const progress = session ? session.maxProg : 0;
 
@@ -110,7 +133,15 @@ export function useHike(settings: HikeSettings) {
       tracker.current = hikeTracker(track.pts, track.cum, HIKE_MATCH, {
         offThreshold: settingsRef.current.off,
       });
-      if (session) tracker.current.anchor(progress);
+      // Swapping to the other line of the same day, at a signpost, is a
+      // relocation and not a resume. The session carries over, because it is
+      // the same walk, but the tracker is left unanchored so the first fix
+      // searches the whole new line and places the walker where they
+      // actually are. Anchoring would aim it at a distance measured along
+      // the line just left: right at the branch, where the two share their
+      // first kilometres, and increasingly wrong anywhere else.
+      const swapped = leaving != null && leaving.id !== id && dayId(leaving) === dayId(hike);
+      if (session && !swapped) tracker.current.anchor(progress);
 
       setState({
         ...INITIAL,
@@ -128,7 +159,7 @@ export function useHike(settings: HikeSettings) {
       const urls = corridorTiles(hike.pts);
       void cachedCount(urls).then((have) => patch({ tiles: { have, total: urls.length } }));
 
-      return { hike, track, resumed: session != null };
+      return { hike, track, resumed: session != null && !swapped };
     },
     [patch],
   );
@@ -145,13 +176,9 @@ export function useHike(settings: HikeSettings) {
     });
   }, []);
 
-  // A mirror of state, for callbacks that must stay stable across renders.
-  const stateRef = useRef(state);
-  stateRef.current = state;
-
-  /** Write the live session to storage. */
+  /** Write the live session to storage, under the day it belongs to. */
   const save = useCallback(() => {
-    const id = stateRef.current.hike?.id;
+    const id = dayId(stateRef.current.hike);
     const s = sessionRef.current;
     if (id && s) persistSession(APP, id, s);
   }, []);
@@ -247,7 +274,7 @@ export function useHike(settings: HikeSettings) {
   const clearSession = useCallback(() => {
     sessionRef.current = null;
     lastSaved.current = 0;
-    const id = stateRef.current.hike?.id;
+    const id = dayId(stateRef.current.hike);
     if (id) clearStoredSession(APP, id);
     patch({ session: null, progress: 0 });
   }, [patch]);

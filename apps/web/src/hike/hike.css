@@ -207,6 +207,10 @@ body.library .dash, body.library .sheet, body.settings .dash, body.settings .she
 .hike .acts button.danger { color: var(--warn); }
 .hike .off { font-size: 12px; font-weight: 600; }
 .hike .off.ok { color: var(--good); } .hike .off.no { color: var(--amber); }
+/* Another line of the day above it, not a walk of its own: indented and
+   hung off the row it forks from, so the list reads as four days rather
+   than seven separate hikes. */
+.hike.option { margin-left: 14px; border-left: 3px solid var(--line-strong); border-top-left-radius: 0; border-bottom-left-radius: 0; }
 .set-body label { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
 .set-body input, .set-body select { font: inherit; font-size: 14px; border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; width: 120px; background: var(--panel); color: var(--ink); }
 .set-body .hint { font-size: 12px; color: var(--muted); margin: 8px 0; line-height: 1.4; }

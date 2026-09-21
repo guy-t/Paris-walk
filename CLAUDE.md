@@ -253,6 +253,39 @@ to its door does not. The ids are frozen — they key `hike:notes:<id>` and
 the saved session, so renaming one on the eve of a walk loses both. The day
 number lives in the display name instead.
 
+**A day that forks is two hikes but one day.** The harder option ships as its
+own line, because one GPX document is one polyline to the map-matcher. Every
+piece of state a walker accumulates therefore hangs off `dayId(hike)` — the
+main line's id, even while walking the option — and not off the line they
+happen to be on: the route notes (`hike:notes:<day>`), which variant they
+chose, the live session, and the history. Per-line things key off `hike.id`
+instead, because they genuinely differ: the tile cache, the sights along it,
+the forecast sampled along it.
+
+The pills in the Route notes tab now swap the line as well as the text.
+`lineForVariant` matches a variant to a line **by position**, not by name:
+the ids come from the headings in the file the walker imported
+(`## Harder option` → `harder-option`) and next week's notes may word it
+differently, but the printed notes always give the main route first and each
+alternative after. `scripts/build-tracks.mjs` refuses to emit an option
+listed before the line it forks from, since that would swap the two silently
+and the only symptom would be the wrong instructions at a junction.
+
+Swapping is not resuming, which is why `openHike` works out for itself
+whether this is a swap (same day, different line) and then leaves the
+tracker unanchored. The two lines share their first kilometres, so at the
+branch the carried-over progress is right — but anchoring anywhere else
+would aim the matcher at a distance measured along the line just left.
+Unanchored, the first fix searches the whole new line and finds the walker.
+Measured on the built app: swapped at the monastery, one fix later the
+dashboard read 2.9 km done of the harder line's 14.1 km, tracking, not off
+route, and the session's `start` was unchanged.
+
+`openHike` also flushes the outgoing session before replacing it. Saves are
+otherwise every 20 seconds, so switching lines mid-walk dropped whatever had
+accrued since the last one — visible in the measurement above as a stored
+`maxProg` of 0 before the swap and 3342 after it.
+
 **Waypoint names can hide in an extension.** Garmin writes some points with
 no `<name>` at all and the label in
 `<extensions><label_text>`, which no reader is obliged to look at. Three of
@@ -287,7 +320,7 @@ Pages CDN caches 404s, so a path a deploy just added keeps answering 404.
 ```bash
 pnpm install
 pnpm typecheck          # tsc --build across all projects
-pnpm test               # vitest, 296 tests
+pnpm test               # vitest, 308 tests
 pnpm build              # web build for Pages
 pnpm --filter @slownav/web build:native   # payload for the APK
 pnpm --filter @slownav/web dev            # local dev server
@@ -338,11 +371,12 @@ done by hand once — the settings API needs repo-admin rights the default
   and `projectAll` did not change it, since every position it recovers is
   further along. Worth revisiting only if a day turns up whose first
   kilometres are visibly wrong.
-- **A variant is chosen, not detected.** The switcher in the Route notes tab
-  sets which line the walker is on. The app could notice that the position
-  matches the other variant's stretch and offer to switch, but being asked
-  "are you on the hard one?" halfway up a muddy path is worse than choosing
-  at the signpost.
+- **A variant is chosen, not detected.** The pills in the Route notes tab set
+  which line the walker is on — one tap now opens the other line and keeps
+  the notes, the choice and the session. The app could instead notice that
+  the position matches the other variant's stretch and offer to switch, but
+  being asked "are you on the hard one?" halfway up a muddy path is worse
+  than choosing at the signpost.
 - Native sensors: step counter and background location. The seam is
   `PositionWatcher` in `@slownav/ui` — swap the watcher, change nothing else.
   The barometer is done: `SlowNavBarometer` in `MainActivity`, read through
