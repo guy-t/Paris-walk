@@ -22,7 +22,7 @@ packages/core     geometry, map-matching, the GPS tracker, sessions, GPX,
                   sun times, Overpass and Wikipedia clients, offline tiles,
                   the forecast client, the barometric maths and the route-notes parser.
                   No React, no Leaflet, no DOM beyond the browser APIs that
-                  are the point. 275 unit tests.
+                  are the point. 285 unit tests.
 packages/ui       MapView, ElevationProfile, Sheet, StatTile, Toast, and the
                   geolocation / wake-lock / service-worker hooks.
 apps/web          one Vite app, one HTML entry per guide, two build targets.
@@ -183,6 +183,15 @@ only when there is exactly one, so a paragraph naming two places anchors to
 neither. Transcribing is copying, which is the point: the fewer decisions
 between the page and the file, the fewer distances get mistyped.
 
+**A waypoint's position on a self-overlapping track is ambiguous.** Because
+the day-1 file holds both variants end to end, and both start at the
+monastery, the single `Monastery Santo Toribio` waypoint projects to 7.74 km
+— the harder option's pass — not to the 21.5 km where the main route reaches
+it. So an anchor can be confidently, badly wrong. `placeSteps` keeps the
+*longest mutually-consistent* set of anchors rather than taking them greedily
+in order: a wrong one is dropped instead of dragging the day with it, and a
+wrong one arriving first does not discard the good ones behind it.
+
 **A GPX handed out with route notes is not always one clean line.** The
 day-1 file for Potes to Cosgaya is 34.6 km for a 14.5 km walk: it holds the
 harder option and the main route end to end in one track, the harder option
@@ -190,9 +199,13 @@ first. So `placeSteps` fits each variant to *its own* anchors rather than
 assuming the notes start where the track starts — that assumption put the
 second instruction eleven kilometres out. The anchors are the bracketed
 waypoints, whose names match the GPX's own (`[1]`, `[A]`,
-`[Hotel del Oso]`); everything between them is interpolated, which rescales
-the printed kilometres onto measured ones. Measured against waypoints not
-used as anchors, the fit is within about 150 m.
+`[Hotel del Oso]`), plus places named in a step's *last sentence* — "to
+reach a crossroads in the hamlet of Congarna" means the step ends there, so
+it anchors the step after it. Only the last sentence: a place named earlier
+is usually one you pass or can see, and anchoring on a sighting is worse
+than not anchoring. Everything between anchors is interpolated, which
+rescales the printed kilometres onto measured ones. Congarna, Beares and
+San Pelayo land exactly; the fit elsewhere is within about 150 m.
 
 **No AI API belongs in the app.** It has been considered, for matching
 route notes to the route, and turned down: the bracket-to-waypoint link is a
@@ -212,7 +225,7 @@ Pages CDN caches 404s, so a path a deploy just added keeps answering 404.
 ```bash
 pnpm install
 pnpm typecheck          # tsc --build across all projects
-pnpm test               # vitest, 275 tests
+pnpm test               # vitest, 285 tests
 pnpm build              # web build for Pages
 pnpm --filter @slownav/web build:native   # payload for the APK
 pnpm --filter @slownav/web dev            # local dev server
@@ -226,16 +239,15 @@ on PATH.
 | Workflow      | Trigger                  | Does                                          |
 | ------------- | ------------------------ | --------------------------------------------- |
 | `deploy.yml`  | push to `main`, and PRs  | typecheck, test, build; publishes to Pages only on `main` |
-| `android.yml` | push to `main`           | builds an APK, replaces the `android-latest` release |
+| `android.yml` | push to `main`, and PRs  | builds an APK; publishes the `android-latest` release only on `main` |
 | `ios.yml`     | push to `main`           | compiles unsigned on macOS — a rot check only  |
 | `weather.yml` | forecast PRs, weekly     | calls the live forecast API and checks the fields still exist |
 
-A pull request runs `deploy.yml`'s gates and publishes nothing: the
-publishing steps are skipped individually rather than the job being split, so
-the run that guards a change is the same run that would deploy it.
-**`android.yml` is still push-only**, so the Java in `apps/mobile` is first
-compiled after a merge — a mistake there lands on `main` before anything
-says so.
+A pull request runs both workflows' gates and publishes nothing. In each,
+the publishing steps are skipped individually rather than the job being
+split, so the run that guards a change is the same run that would ship it —
+on `android.yml` that means a PR compiles the Java and asserts the APK was
+produced, but does not unlock the signing key or touch the release.
 
 The APK download URL is fixed:
 `https://github.com/guy-t/Paris-walk/releases/download/android-latest/`
@@ -257,17 +269,18 @@ done by hand once — the settings API needs repo-admin rights the default
 ## Not done yet
 
 - Canal and walk ports.
-- **No Android compile on pull requests.** `android.yml` is push-only, so the
-  Java in `apps/mobile` is first compiled after a merge. It has been right so
-  far; it is still the last real gap in the checks.
-- **Route notes: no variant switcher.** The notes carry a main route and a
-  harder option, and both are placed, but the app does not know which one the
-  walker chose — so on the harder option the position is matched against the
-  main line and drifts until the two rejoin.
-- **Route notes: only bracketed names anchor.** The notes also name places in
-  prose that exist as waypoints — the monastery, Congarna, Beares, San
-  Pelayo — and matching those would add anchors where there are fewest, at
-  the start of the day, which is the stretch currently extrapolated.
+- **The first kilometres of a day are still extrapolated.** Prose anchoring
+  fixed the middle of day 1 but not its start, because the waypoints there
+  (the monastery above all) project onto the harder option's pass and are
+  rejected as inconsistent. The fix is to offer each waypoint's *several*
+  plausible positions on a self-overlapping track — every local minimum
+  within ~150 m of the line, not just the global nearest — and let the
+  consistency filter choose. That needs a `projectAll` in `match.ts`.
+- **A variant is chosen, not detected.** The switcher in the Route notes tab
+  sets which line the walker is on. The app could notice that the position
+  matches the other variant's stretch and offer to switch, but being asked
+  "are you on the hard one?" halfway up a muddy path is worse than choosing
+  at the signpost.
 - **Open with is unconfirmed on a real phone.** The intent-filters decode
   correctly in the built APK but the app has not been seen in Android's
   chooser; the next clue is which app the .gpx is being shared *from*.

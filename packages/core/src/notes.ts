@@ -158,6 +158,48 @@ export function parseNotes(text: string): RouteNotes {
   return out;
 }
 
+/**
+ * The largest set of anchors that agree with each other.
+ *
+ * Anchors must increase in both measures: walking further along the notes
+ * means walking further along the track. Taking them greedily in order and
+ * dropping whatever disagrees is not enough — one wrong anchor near the
+ * start would then throw out every good one after it, which is the
+ * opposite of what is wanted.
+ *
+ * A real case: the GPX has one waypoint named Camaleño and the route passes
+ * through that village on both variants, so the main route's mention can
+ * match the harder option's waypoint fourteen kilometres away. Keeping the
+ * longest mutually-consistent run drops the odd one out instead of the many.
+ */
+function longestConsistent(
+  candidates: ReadonlyArray<{ noteM: number; prog: number }>,
+): Array<{ noteM: number; prog: number }> {
+  const sorted = [...candidates].sort((a, b) => a.noteM - b.noteM || a.prog - b.prog);
+  if (sorted.length < 2) return sorted;
+
+  // Longest strictly increasing run by prog, over a list already ordered by
+  // noteM. Tens of anchors at most, so the simple quadratic is the right one.
+  const best = new Array<number>(sorted.length).fill(1);
+  const from = new Array<number>(sorted.length).fill(-1);
+  let endAt = 0;
+  for (let i = 0; i < sorted.length; i++) {
+    for (let j = 0; j < i; j++) {
+      if (sorted[j]!.prog < sorted[i]!.prog && sorted[j]!.noteM < sorted[i]!.noteM) {
+        if (best[j]! + 1 > best[i]!) {
+          best[i] = best[j]! + 1;
+          from[i] = j;
+        }
+      }
+    }
+    if (best[i]! > best[endAt]!) endAt = i;
+  }
+
+  const out: Array<{ noteM: number; prog: number }> = [];
+  for (let i = endAt; i !== -1; i = from[i]!) out.unshift(sorted[i]!);
+  return out;
+}
+
 /** A waypoint on the track, as the app already knows it. */
 export interface NoteAnchor {
   name: string;
@@ -174,6 +216,62 @@ export interface PlacedStep extends NoteStep {
 }
 
 const key = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
+
+/**
+ * A name reduced to what two people would agree it is.
+ *
+ * Accents go (the notes write "Camaleño", the GPX "Camaleno"), as do the
+ * little words that differ between a label and a sentence — "Monastery
+ * Santo Toribio" against "to reach the Monastery of Santo Toribio".
+ */
+function loose(s: string): string {
+  return s
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w && !["of", "the", "de", "del", "la", "el", "a"].includes(w))
+    .join(" ");
+}
+
+/**
+ * The place a step ends at, named in prose rather than in brackets.
+ *
+ * These notes bracket the turns and write the places into the sentence: "…
+ * Continue for a further 800m to reach a crossroads in the hamlet of
+ * Congarna." The GPX has a waypoint called Congarna, so that sentence is an
+ * anchor going spare — and they cluster at the start of the day, which is
+ * the stretch with fewest brackets and the only one placed by extrapolating
+ * backwards.
+ *
+ * Only the last sentence counts. A place named earlier is usually something
+ * you pass or can see — "the wooden gallery of Casa Cayo should be visible
+ * across the river" is not an instruction to arrive there — and anchoring
+ * on a sighting would be worse than not anchoring at all.
+ */
+function endsAt(text: string, anchors: readonly NoteAnchor[]): NoteAnchor | null {
+  // Drop the trailing "(14mins & 1.2km)" before looking for the last
+  // sentence: it is a measurement, not prose, and it has no place names.
+  const prose = text.replace(/\([^)]*\)\s*$/, "").trim();
+  const sentences = prose.split(/(?<=[.!?])\s+/).filter(Boolean);
+  const last = loose(sentences.at(-1) ?? "");
+  if (!last) return null;
+
+  let best: NoteAnchor | null = null;
+  for (const a of anchors) {
+    const name = loose(a.name);
+    // Short names are the bracketed ones — "1", "A", "D". They mean
+    // something as a label and nothing in a sentence.
+    if (name.length < 4) continue;
+    if (!new RegExp(`(^|\\s)${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(\\s|$)`).test(last)) {
+      continue;
+    }
+    // The longest match wins, so "Fuente De Valley" beats "Fuente De".
+    if (!best || loose(best.name).length < name.length) best = a;
+  }
+  return best;
+}
 
 /**
  * Place every step on the track.
@@ -215,14 +313,24 @@ export function placeSteps(
 
     // Anchor pairs in note order, monotonic in both measures: a mistyped
     // reference must cost one step, not drag the rest of the day with it.
-    const pairs: Array<{ noteM: number; prog: number }> = [];
-    for (const s of mine) {
-      const prog = exactFor(s);
-      if (prog == null || s.noteM == null) continue;
-      const last = pairs.at(-1);
-      if (last && (prog <= last.prog || s.noteM <= last.noteM)) continue;
-      pairs.push({ noteM: s.noteM, prog });
+    //
+    // Two kinds go in. A bracketed waypoint fixes where its own step
+    // *starts*. A place named in a step's last sentence fixes where that
+    // step *ends*, which is where the next one starts — so it is filed
+    // against the following step's distance.
+    const candidates: Array<{ noteM: number; prog: number }> = [];
+    for (let i = 0; i < mine.length; i++) {
+      const s = mine[i]!;
+      const exact = exactFor(s);
+      if (exact != null && s.noteM != null) candidates.push({ noteM: s.noteM, prog: exact });
+
+      const next = mine[i + 1];
+      if (!next || next.noteM == null || exactFor(next) != null) continue;
+      const ends = endsAt(s.text, anchors);
+      if (ends) candidates.push({ noteM: next.noteM, prog: ends.prog });
     }
+
+    const pairs = longestConsistent(candidates);
 
     if (!pairs.length && variant === firstVariant) {
       const lastNote = Math.max(0, ...mine.map((s) => s.noteM ?? 0));

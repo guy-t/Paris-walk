@@ -1,6 +1,13 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { importNotes, loadNotes, clearNotes, placeNotes } from "./notes.js";
+import {
+  clearNotes,
+  importNotes,
+  loadNotes,
+  loadVariant,
+  placeNotes,
+  saveVariant,
+} from "./notes.js";
 import type { WaypointAt } from "./model.js";
 
 const NOTES = `# Vale to Hilltop
@@ -70,5 +77,46 @@ describe("placeNotes", () => {
 
   it("has nothing to place when no notes are imported", () => {
     expect(placeNotes(null, waypoints, 12000)).toEqual([]);
+  });
+});
+
+describe("the chosen variant", () => {
+  beforeEach(() => localStorage.clear());
+
+  const TWO = `# Day
+## Main route
+
+0:00 0km  Follow the track.
+
+## Harder option
+
+0:10 1km  Climb the narrow path.
+`;
+
+  it("starts on the first variant the notes describe", () => {
+    importNotes("h1", TWO);
+    expect(loadVariant("h1", loadNotes("h1"))).toBe("main-route");
+  });
+
+  it("remembers the choice for that hike", () => {
+    importNotes("h1", TWO);
+    saveVariant("h1", "harder-option");
+    expect(loadVariant("h1", loadNotes("h1"))).toBe("harder-option");
+  });
+
+  it("falls back when the stored choice is not in these notes", () => {
+    // Re-importing a different day must not leave the walker on a variant
+    // that no longer exists, with no instructions at all.
+    importNotes("h1", TWO);
+    saveVariant("h1", "harder-option");
+    importNotes("h1", "# Other\n\n0:00 0km  Just the one way.\n");
+    expect(loadVariant("h1", loadNotes("h1"))).toBe("main");
+  });
+
+  it("is forgotten along with the notes", () => {
+    importNotes("h1", TWO);
+    saveVariant("h1", "harder-option");
+    clearNotes("h1");
+    expect(localStorage.getItem("hike:variant:h1")).toBeNull();
   });
 });
