@@ -379,11 +379,21 @@ walk and the notes part company: a missed turn, a stretch covered with the
 screen off, a variant taken that the app was not told about. Reported from
 the hill: the cue sat on `[D]` for a long time with no way to move it on,
 which is the worst case, because the single instruction on the screen is
-then confidently wrong. The arrows hold a step of the walker's choosing; the
-hold is released by the walk catching up with it or by the button that says
-so, never silently, since a cue that sprang back mid-read would be worse
-than one that is stuck. The cue also says where its instruction is —
-"in 10 m", "1.8 km back" — so a stalled one looks stalled.
+then confidently wrong. A swipe holds a step of the walker's choosing — left
+for the next, the way a page turns; the hold is released by the walk catching
+up with it or by the one button on the cue, never silently, since a cue that
+sprang back mid-read would be worse than one that is stuck.
+
+It was two 40px arrows before, either side of the one thing on screen worth
+reading: a third of the width of a 360px phone spent on chrome, on the line
+a walker has to take in at a junction. The instruction has the full width
+now, and everything about it sits on a second line — where it is ("in 10 m",
+"1.8 km back", so a stalled cue looks stalled), and either the next one's
+distance or `Back to live`. The card follows the thumb while dragging and
+springs back from a short drag, which is the whole affordance now that
+nothing on screen says the gesture exists; `touch-action: pan-y` keeps the
+page's vertical scrolling. Arrow keys still work, which is all the buttons
+were doing for anyone who needed them.
 
 `stepAt` also returned nothing at all before the first instruction. The
 notes are fitted to the measured line, so step one lands a few metres along

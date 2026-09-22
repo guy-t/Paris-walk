@@ -308,19 +308,28 @@ body.map-full .dash { position: absolute; top: max(8px, env(safe-area-inset-top)
 .notes-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-top: 10px; font-size: 12px; color: var(--muted-strong); }
 .notes-foot button { border: 1px solid var(--line-strong); background: var(--panel); border-radius: 8px; padding: 6px 10px; font-size: 12px; min-height: 34px; }
 /* The live instruction on the dashboard, above the map. */
-.cue { display: flex; align-items: center; gap: 10px; margin: 6px 10px 0; padding: 8px 10px; border-radius: 10px; background: #f0f5f1; font-size: 14px; }
+/*
+ * The live cue: the instruction, then everything about it on one small line.
+ *
+ * Swiped rather than buttoned. Two 40px arrows either side of the one thing
+ * on screen worth reading cost a third of the width of a 360px phone, on the
+ * line a walker has to take in at a junction. `touch-action: pan-y` keeps the
+ * page's own vertical scrolling while claiming the horizontal gesture.
+ */
+.cue { display: block; margin: 6px 10px 0; padding: 8px 10px; border-radius: 10px; background: #f0f5f1; font-size: 14px; touch-action: pan-y; overflow: hidden; }
+.cue:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* The transition is what makes a drag that did not reach the threshold feel
+   like a refusal rather than a glitch; it is off while the thumb is down,
+   because then the card has to track it exactly. */
+.cue .cue-body { display: flex; align-items: baseline; gap: 8px; transition: transform .18s ease; }
+.cue .cue-body.dragging { transition: none; }
 .cue .cue-text { flex: 1; min-width: 0; line-height: 1.35; }
+.cue .cue-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 3px; min-height: 18px; }
 .cue .cue-dist { font-variant-numeric: tabular-nums; color: var(--muted-strong); font-size: 12px; white-space: nowrap; }
 .cue.warn { background: #fef2f2; color: var(--warn); font-weight: 600; }
-/* Step through the notes by hand. Thumb-sized, because the one time this is
-   needed is when the walk and the notes have parted company — a missed turn,
-   a stretch walked with the screen off — and that is not the moment to be
-   aiming at a 24px glyph. */
-.cue .cue-step { flex: 0 0 auto; width: 40px; height: 40px; border: 1px solid var(--line-strong); background: var(--panel); color: var(--ink); border-radius: 10px; font-size: 18px; line-height: 1; display: grid; place-items: center; }
-.cue .cue-step:disabled { opacity: .35; }
 .cue.held { background: #fffbeb; box-shadow: inset 0 0 0 1px var(--amber); }
-.cue .cue-live { flex: 0 0 auto; border: 0; background: var(--amber); color: #fff; border-radius: 999px; padding: 6px 10px; font-size: 12px; font-weight: 600; white-space: nowrap; }
-.cue-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+/* The one control left, and only while a step is being held by hand. */
+.cue .cue-live { flex: 0 0 auto; border: 0; background: var(--amber); color: #fff; border-radius: 999px; padding: 4px 10px; font-size: 12px; font-weight: 600; white-space: nowrap; min-height: 28px; }
 /* Which of the day's two routes is being walked. */
 .variants { display: flex; gap: 6px; margin-bottom: 10px; }
 .variants button { flex: 1; min-height: 40px; padding: 8px 10px; font-size: 13px; border: 1px solid var(--line-strong); background: var(--panel); color: var(--ink); border-radius: 999px; }
