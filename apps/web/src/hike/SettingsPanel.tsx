@@ -7,6 +7,7 @@
 import { providersFor, store, type AnyPoint } from "@slownav/core";
 import { useMemo, useState } from "react";
 import { DEFAULT_SETTINGS, type HikeSettings } from "./model.js";
+import { backgroundTrackingAvailable } from "../shared/geolocation.js";
 
 export interface SettingsPanelProps {
   settings: HikeSettings;
@@ -93,6 +94,28 @@ export function SettingsPanel({ settings, onSave, onClose, near }: SettingsPanel
           The map still opens showing the whole route rather than jumping to you — tap the
           arrow to follow.
         </p>
+
+        {/* Only where it can actually be done. On a phone without the shell,
+            or in a browser, a switch that promised this would be a lie: a
+            hidden page is given no fixes by any browser. */}
+        {backgroundTrackingAvailable() && (
+          <>
+            <label>
+              Keep recording with the screen off
+              <input
+                type="checkbox"
+                checked={draft.bgGps}
+                onChange={(e) => set("bgGps", e.target.checked)}
+              />
+            </label>
+            <p className="hint">
+              Off, the trail has gaps whenever the phone is in a pocket — your place on the
+              route, distance and ETA all recover on the first fix when you wake it, but the
+              line does not. On, a notification stays up while the walk records and the GPS
+              keeps running, which costs noticeably more battery over a day.
+            </p>
+          </>
+        )}
 
         <label>
           Units

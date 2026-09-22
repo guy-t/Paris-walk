@@ -123,7 +123,10 @@ export function App() {
   const sw = useServiceWorker(wantsServiceWorker() ? `${import.meta.env.BASE_URL}sw.js` : "");
 
   // Chosen once: the browser API in a tab, Capacitor's plugin in the shell.
-  const watcher = useMemo(() => positionWatcher(), []);
+  // Re-chosen when the background setting changes, and only then: the hook
+  // compares watcher identities and restarts the watch on a real change, so
+  // turning it on at a col takes effect at the col.
+  const watcher = useMemo(() => positionWatcher(settings.bgGps), [settings.bgGps]);
 
   /**
    * Whether the walker asked for GPS, as opposed to it starting itself.
