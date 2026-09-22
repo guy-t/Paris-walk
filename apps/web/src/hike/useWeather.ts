@@ -10,6 +10,9 @@
 import {
   addSample,
   altitudeFromPressure,
+  correctForTemperature,
+  interp,
+  positionAt,
   pressureTrend,
   store,
   STANDARD_MSL,
@@ -41,6 +44,8 @@ export interface BarometerState {
   trend: PressureTrend | null;
   /** Height from pressure, metres — null until there is a reading. */
   altitudeM: number | null;
+  /** True when the forecast's temperature has been used to correct the column. */
+  tempCorrected: boolean;
   /** True when the forecast supplied a sea-level pressure to work from. */
   calibrated: boolean;
 }
@@ -99,11 +104,39 @@ export function useWeather(
   // ---- the barometer ----
   const available = useMemo(() => barometerAvailable(), []);
 
+  /**
+   * How high the walker is, from the route's own profile.
+   *
+   * Held in a ref because the sampler runs on its own interval and must not
+   * be torn down and restarted every time the walker moves a few metres.
+   */
+  const eleRef = useRef<number | null>(null);
+  eleRef.current = useMemo(() => {
+    if (!track) return null;
+    const { idx, t } = positionAt(track.pts, track.cum, progress);
+    return interp(track.ele, idx, t);
+  }, [track, progress]);
+
+  /**
+   * And how warm the air is, for the same reason.
+   *
+   * Reducing to sea level through the standard column leaves a residual that
+   * grows with height: on a cold day a 745 m climb still reads as 3.4 hPa of
+   * "falling", which is the whole threshold. With the real temperature the
+   * hill cancels exactly.
+   */
+  const tempRef = useRef<number | null>(null);
+
   useEffect(() => {
     if (!available) return;
     const take = () => {
-      const reading = readPressure();
-      if (!reading) return;
+      const raw = readPressure();
+      if (!raw) return;
+      // Stamp the reading with where the walker was when it was taken. Only
+      // then can the trend tell a hill from a depression — and the route's
+      // own surveyed profile is a far better height for this than the GPS's,
+      // which is the phone's worst number.
+      const reading = { ...raw, ele: eleRef.current, tempC: tempRef.current };
       setLatest(reading);
       setHistory((h) => {
         const next = addSample(h, reading);
@@ -127,12 +160,19 @@ export function useWeather(
     // The sea-level pressure where the walker is now, which is what makes a
     // reading a height rather than just a number.
     const msl = rows[0]?.hour?.pressureMslHPa ?? null;
+    // And the air temperature there, which decides how much of the column
+    // the formula has mis-sized. It is the largest error left once the
+    // sea-level pressure is known: +53 m at 1900 m on a −5 °C morning.
+    const tempC = rows[0]?.hour?.tempC ?? null;
+    tempRef.current = tempC;
+    const raw = latest ? altitudeFromPressure(latest.hPa, msl ?? STANDARD_MSL) : null;
     return {
       available,
       latest,
       trend: history.length ? pressureTrend(history) : null,
-      altitudeM: latest ? altitudeFromPressure(latest.hPa, msl ?? STANDARD_MSL) : null,
+      altitudeM: raw != null && tempC != null ? correctForTemperature(raw, tempC) : raw,
       calibrated: msl != null,
+      tempCorrected: raw != null && tempC != null,
     };
   }, [available, latest, history, rows]);
 
