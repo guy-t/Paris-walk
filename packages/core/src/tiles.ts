@@ -27,6 +27,27 @@ export interface TileSource {
   corridorM: number;
 }
 
+/**
+ * The deepest zoom "Prepare offline" will fetch.
+ *
+ * Reported from the hill: zoom in past the downloaded levels and the map goes
+ * blank. Two causes, both here. The cap was 16 while the Spanish IGN serves
+ * genuine detail to 17, so a whole level was being thrown away; and the map
+ * was told it could fetch to the provider's own native maximum, so it asked
+ * for tiles the download had never been asked to save.
+ *
+ * 17 is where it stops. 18 would be four times the tiles again — a day's walk
+ * goes from about 1,200 to about 3,900, 31 MB to 99 MB — for detail that does
+ * not exist on a 1:25,000 survey, and on a volunteer-funded server it would
+ * stop being the bounded download that makes any of this acceptable.
+ *
+ * The map's own `maxNativeZoom` is clamped to this, so beyond it Leaflet
+ * upscales what is cached rather than requesting what is not. Soft, and never
+ * blank — which is the right way round for an app whose whole purpose is the
+ * valley with no signal.
+ */
+export const OFFLINE_TOP_ZOOM = 17;
+
 export const OPENTOPO: TileSource = {
   url: "https://a.tile.opentopomap.org/{z}/{x}/{y}.png",
   zooms: [12, 13, 14, 15, 16],
@@ -190,7 +211,7 @@ export function sourceForProvider(
       : null
     : provider.url;
   if (!url) return null;
-  const top = Math.min(16, provider.maxNativeZoom);
+  const top = Math.min(OFFLINE_TOP_ZOOM, provider.maxNativeZoom);
   const zooms: number[] = [];
   for (let z = 12; z <= top; z++) zooms.push(z);
   return { url, zooms, corridorM };

@@ -21,6 +21,18 @@ export interface DashboardProps {
   compact: boolean;
   onCompact: (v: boolean) => void;
   onScrub: (metres: number) => void;
+  /**
+   * A better altitude than the GPS's, when there is one.
+   *
+   * Reported from the hill: this tile and the barometer in the weather tab
+   * disagreed. They were two different instruments and only one of them said
+   * so. A GPS fix is routinely 10–30 m out vertically; a pressure reading
+   * calibrated against the forecast's `pressure_msl` is usually far better,
+   * which is the whole reason the barometer is read at all. So the better
+   * number wins here, and the tile says which one it is rather than leaving
+   * the walker to wonder why two screens differ.
+   */
+  altitude?: { metres: number; source: string } | null;
   /** Ticks every few seconds so elapsed and average times stay live. */
   tick: number;
 }
@@ -33,6 +45,7 @@ export function Dashboard({
   compact,
   onCompact,
   onScrub,
+  altitude: betterAltitude,
   tick,
 }: DashboardProps) {
   const { track, session, progress, mode } = state;
@@ -57,7 +70,11 @@ export function Dashboard({
 
   const { idx, t } = positionAt(track.pts, track.cum, progress);
   const climbLeft = Math.max(0, track.up - interp(track.upCum, idx, t));
-  const altitude = mode === "gps" && state.altitude != null ? state.altitude : interp(track.ele, idx, t);
+  const gpsAltitude =
+    mode === "gps" && state.altitude != null ? state.altitude : interp(track.ele, idx, t);
+  const altitude = betterAltitude?.metres ?? gpsAltitude;
+  const altitudeSource =
+    betterAltitude?.source ?? (mode === "gps" && state.altitude != null ? "GPS" : "from the map");
   const afterSunset = !!(sun && eta && eta.at > sun.sunset);
 
   const dotClass = !state.pos
@@ -78,8 +95,8 @@ export function Dashboard({
   const elapsed = session ? (Date.now() - session.start) / 1000 : 0;
   const moving = session?.moving ?? 0;
   const dist = session?.dist ?? 0;
-  const strip: [string, string][] = [
-    ["Altitude", fmt.alt(altitude)],
+  const strip: [string, string, string?][] = [
+    ["Altitude", fmt.alt(altitude), altitudeSource],
     ["Speed", fmt.speed(mode === "gps" ? state.speed : null)],
     ["Moving avg", fmt.speed(moving > 60 ? dist / moving : null)],
     ["Overall avg", fmt.speed(elapsed > 60 ? dist / elapsed : null)],

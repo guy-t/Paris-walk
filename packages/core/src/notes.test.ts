@@ -307,8 +307,14 @@ describe("stepAt", () => {
     expect(next?.prog).toBeGreaterThan(800);
   });
 
-  it("has no current step before the first one", () => {
-    expect(stepAt(placed, -50).current).toBeNull();
+  it("shows the first step before the walker reaches it", () => {
+    // Before the first instruction, it is the first instruction: the notes
+    // are fitted to the line, so step one lands a few metres along and the
+    // cue would otherwise be blank for the opening stretch of the walk.
+    const before = stepAt(placed, -50);
+    expect(before.current).toBe(placed[0]);
+    expect(before.next).toBe(placed[1]);
+    expect(stepAt([], 0).current).toBeNull();
   });
 
   it("has no next step at the end", () => {
