@@ -22,7 +22,7 @@ packages/core     geometry, map-matching, the GPS tracker, sessions, GPX,
                   sun times, Overpass and Wikipedia clients, offline tiles,
                   the forecast client, the barometric maths and the route-notes parser.
                   No React, no Leaflet, no DOM beyond the browser APIs that
-                  are the point. 303 unit tests.
+                  are the point. 314 unit tests.
 packages/ui       MapView, ElevationProfile, Sheet, StatTile, Toast, and the
                   geolocation / wake-lock / service-worker hooks.
 apps/web          one Vite app, one HTML entry per guide, two build targets.
@@ -164,6 +164,31 @@ which proves nothing about whether the service still sends those fields. So
 pull requests. It is deliberately not part of `deploy.yml`: a walk must
 never be blocked because a weather service is having an afternoon.
 
+**A barometer on a walker measures the hill, not the weather.** Reported
+from the hill: walking uphill made the app announce a storm. It was right
+to — the trend was computed on raw station pressure, where 1 hPa is 8.5 m,
+so 26 m of ascent in three hours is the whole conventional "falling
+quickly" threshold and day 2's 745 m of climb reads as −84 hPa, against the
+roughly 30 hPa that separates a deep low from a strong high. Every walking
+day tripped it, permanently.
+
+Each reading is therefore stamped with where the walker was — the route's
+own surveyed profile, not the GPS's altitude, which is the phone's worst
+number — and `pressureTrend` reduces every sample to sea level before
+comparing. A reading whose height is unknown is dropped rather than mixed
+in, because half a series reduced and half not carries the whole hill into
+the answer. Each end of the window is a 15-minute median, so one reading
+taken in a doorway cannot announce a storm.
+
+The reduction needs the air temperature too, which is less obvious and was
+found by making the fixture physically consistent. Reduce through the
+*standard* column and the residual scales with height: the same climb on a
+−15 °C day still leaves 3.4 hPa behind, which is the entire threshold again.
+With the forecast's temperature at the walker's point the hill cancels
+exactly — measured, 86.9 hPa of climb reading as +0.0 hPa over three hours.
+A fixture that generates standard-atmosphere pressure and then labels it
+−5 °C contradicts itself and will make this look right when it is not.
+
 **Barometric altitude is only as good as its reference.** Pressure gives a
 beautifully smooth height *change*, which GPS cannot; absolute height needs
 a sea-level pressure, and that moves with the weather — 30 hPa between a
@@ -174,6 +199,21 @@ Android-only (no shipping web API exposes a barometer) and absent on many
 phones, so everything degrades to nothing through `barometerAvailable()`.
 Confirmed working on the owner's phone: pressure, trend and a calibrated
 height all read correctly.
+
+What the number is worth, once the sea-level pressure is known: the sensor
+at ±1 hPa is ±9 m, the forecast's own `pressure_msl` error about the same,
+and the largest term left is the air not being at standard temperature.
+That one runs the intuitive way — cold air is dense, so the formula reads
+high — and it is not small: +53 m at 1900 m on a −5 °C morning, −45 m at
+1100 m on a 20 °C afternoon. `correctForTemperature` takes it out using the
+forecast's temperature at the walker, one pass from the uncorrected height
+as its guess, which lands within a couple of metres. So roughly ±15 m
+corrected, and the panel says so rather than showing four confident digits.
+
+None of which touches what the instrument is actually good at: 10 m of
+climb is 1.08 hPa and the sensor resolves about 0.05, so *change* is good
+to well under a metre. Excellent at "am I still going up", fair at "how
+high am I", and the UI should never let those two be confused.
 
 **Route notes never enter this repository.** They are the walking company's
 words — a personal copy of a copyrighted document, with the host's mobile
@@ -373,7 +413,7 @@ Pages CDN caches 404s, so a path a deploy just added keeps answering 404.
 ```bash
 pnpm install
 pnpm typecheck          # tsc --build across all projects
-pnpm test               # vitest, 315 tests
+pnpm test               # vitest, 326 tests
 pnpm build              # web build for Pages
 pnpm --filter @slownav/web build:native   # payload for the APK
 pnpm --filter @slownav/web dev            # local dev server

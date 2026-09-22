@@ -55,9 +55,22 @@ export function WeatherPanel({
                 {/* Said plainly: without a sea-level reference this number
                     can be a couple of hundred metres out, and a walker
                     deserves to know which one they are looking at. */}
-                <small>{barometer.calibrated ? " (from forecast pressure)" : " (uncalibrated)"}</small>
+                <small>
+                  {barometer.calibrated
+                    ? barometer.tempCorrected
+                      ? " ±15 m · forecast pressure and temperature"
+                      : " ±25 m · from forecast pressure"
+                    : " uncalibrated — could be 200 m out"}
+                </small>
               </span>
             )}
+          </div>
+          {/* Said once, where the number is: this instrument is excellent at
+              change and only fair at absolute height, and a walker reading
+              1,904 m off a screen deserves to know which of those they have. */}
+          <div className="wx-baro-note">
+            Steady to about a metre on the climb; the absolute height depends on the
+            forecast being right about the air.
           </div>
           <div className="wx-trend">
             {barometer.trend
