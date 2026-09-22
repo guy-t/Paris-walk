@@ -197,6 +197,17 @@ body.sheet-open .dash .profile, body.sheet-open .dash .strip { display: none; }
  * spends it on the four lines telling the walker where to turn.
  */
 body.cue-tall .dash .profile, body.cue-tall .dash .strip { display: none; }
+/*
+ * The next-waypoint row goes when there is a cue.
+ *
+ * It was the dashboard's answer to "what is coming" before the route notes
+ * existed. The cue answers the same question better — the instruction
+ * itself, not the name of the next dot — and one row higher, so keeping
+ * both is two takes on the same thing stacked on a screen read at a
+ * junction. It comes back for a hike with no notes imported, where it is
+ * the only answer there is.
+ */
+body.has-cue .dash .next { display: none; }
 .sheet-head { position: relative; display: flex; align-items: center; gap: 10px; height: 52px; padding: 0 14px; cursor: pointer; user-select: none; flex-shrink: 0; }
 .sheet-head .grip { width: 36px; height: 4px; border-radius: 2px; background: #d4d4d4; position: absolute; left: 50%; transform: translateX(-50%); top: 6px; }
 .sheet-head h2 { font-size: 15px; margin: 0; flex: 1; }

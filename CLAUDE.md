@@ -395,13 +395,32 @@ and only binds when the column is short; when an instruction still will not
 fit, the dashboard's profile and stat strip step aside, as they already do
 for the sheet.
 
-That last test is a measurement, not a threshold, because the right threshold
-differs on every screen. It compares the cue's content against the room it
-gets *with the dashboard whole*, which is only observable while it is whole —
-so the number is remembered and reused once the extras are hidden. Asking
-"does it fit now?" instead would answer yes the moment the profile went, and
-put it back, every frame. Measured across 360×900, 740, 640 and 560: the
-longest of these four days' notes (217px) shows in full at all of them.
+The next-waypoint row goes too whenever a cue is showing (`body.has-cue`).
+It was the dashboard's answer to "what is coming" before the route notes
+existed; the cue answers it better, with the instruction rather than the name
+of the next dot, and one row higher. It returns for a hike with no notes
+imported, where it is the only answer there is.
+
+That fit test is a measurement, not a threshold, because the right threshold
+differs on every screen. It takes the class off, reads, and puts it back in
+one pass — reading a layout property forces the recompute, so what it sees is
+the room the cue would have with the dashboard whole, and no frame passes for
+anything to be painted in. Going through React and a `requestAnimationFrame`
+instead is a race: the frame can arrive before the state has committed, and
+then the reading is of the layout this very decision produced.
+
+What it must not do is measure a layout that is still moving. Every trigger
+is state the component already holds — the step, the sheet, compact,
+map-full, the panel — plus `resize` and, crucially, the sheet's
+`transitionend`. The sheet animates its `max-height` over 250ms, and a
+measurement taken during that reads 19px of cue, concludes nothing fits, and
+stands for the rest of the walk. Watching the dashboard's own size instead
+would be worse still: that is the thing this decision changes, so it flaps.
+
+Measured across 360×900, 740, 640 and 560, stepping every instruction of
+day 1: the longest note (217px) shows in full at all four, the profile is
+kept at 900 and 740 where there is room and spent at 640 and 560 where there
+is not.
 
 It was two 40px arrows before, either side of the one thing on screen worth
 reading: a third of the width of a 360px phone spent on chrome, on the line

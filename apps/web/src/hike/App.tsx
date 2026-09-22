@@ -104,20 +104,19 @@ export function App() {
   /**
    * A long instruction takes the dashboard's extras rather than being cut.
    *
-   * The test is the cue's content against the room it gets with the
-   * dashboard whole — which is only measurable while it *is* whole, so it is
-   * remembered and reused once the extras are hidden. That is what keeps
-   * this from oscillating: hiding the profile gives the cue more room, and
-   * asking "does it fit now?" would immediately answer yes and put the
-   * profile back, every frame.
+   * Measured rather than compared against a threshold, because the right
+   * threshold differs on every screen: a 900px phone has room for the
+   * longest of these notes and should keep its elevation profile, a 560px
+   * one has not and should spend it.
    *
-   * Measured rather than a threshold, because the right threshold is
-   * different on every screen: a 900px phone has room for the longest of
-   * these notes and should keep its profile, a 560px one does not and should
-   * not.
+   * The measurement has to be taken with the dashboard whole, or it reads
+   * the layout this very decision produced — so each one starts by putting
+   * the extras back, lets that paint, and only then asks whether the
+   * instruction fits. Caching the answer instead looked simpler and was
+   * wrong: the first reading landed in a transient layout and stuck, hiding
+   * the profile on a screen with room to spare.
    */
   const cueRef = useRef<HTMLDivElement>(null);
-  const cueRoom = useRef(Infinity);
   const [cueTall, setCueTall] = useState(false);
   const [tab, setTab] = useState<NearbyTab>("nearby");
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
@@ -439,24 +438,64 @@ export function App() {
   // arrows move both and the two never disagree about where the walker is.
   const currentIndex = cueStep ? noteSteps.indexOf(cueStep) : -1;
 
+  // The next-waypoint row is what the dashboard had before there was a cue.
+  // With one on screen it is a second answer to the same question, one row
+  // lower and less specific. Set here rather than with the other body
+  // classes because it depends on the cue, which is worked out below them.
   useEffect(() => {
-    const el = cueRef.current;
-    if (!el) {
-      setCueTall(false);
-      return;
-    }
-    const check = () => {
-      // Only while the dashboard is whole does the cue's box show what it
-      // would get without this; once the extras are hidden that number is
-      // the answer to a different question.
-      if (!document.body.classList.contains("cue-tall")) cueRoom.current = el.clientHeight;
-      setCueTall(el.scrollHeight > cueRoom.current);
-    };
-    check();
-    const ro = new ResizeObserver(check);
-    ro.observe(el);
-    return () => ro.disconnect();
+    document.body.classList.toggle("has-cue", cueStep != null);
   }, [cueStep]);
+
+  const measureCue = useCallback(() => {
+    const el = cueRef.current;
+    if (!el) return;
+    // Take the class off, read, put it back: reading a layout property
+    // forces the browser to recompute, so this sees the room the cue would
+    // have with the dashboard whole, in one pass and without a frame in
+    // between for anything to be painted in. Going through React and a
+    // requestAnimationFrame instead is a race — the frame can arrive before
+    // the state has committed, and then the reading is of the layout this
+    // decision produced rather than of the one it needs.
+    const was = document.body.classList.contains("cue-tall");
+    document.body.classList.remove("cue-tall");
+    const fits = el.scrollHeight <= el.clientHeight;
+    if (was) document.body.classList.add("cue-tall");
+    setCueTall(!fits);
+  }, []);
+
+  /**
+   * Re-measured whenever the cue's ceiling could have moved.
+   *
+   * Every trigger here is state this component already holds, which is the
+   * point: watching the dashboard's size instead would catch the change this
+   * very decision causes, and flap. The sheet is in the list because opening
+   * it takes the profile away too — a measurement from that moment said the
+   * instruction fitted, and it was still saying so long after the sheet had
+   * closed and taken the room back.
+   */
+  useEffect(() => {
+    if (panel !== "none") return;
+    measureCue();
+  }, [cueStep, sheetOpen, compact, mapFull, panel, measureCue]);
+
+  useEffect(() => {
+    const again = () => measureCue();
+    // The sheet's height is animated, so a measurement taken when it opens
+    // or closes reads a layout that is still moving — 19px of cue, in the
+    // middle of a 250ms transition, which says nothing fits and then stands
+    // for the rest of the walk. This is the one that gets it right.
+    const settled = (e: TransitionEvent) => {
+      if (e.propertyName === "max-height") measureCue();
+    };
+    window.addEventListener("resize", again);
+    window.addEventListener("orientationchange", again);
+    document.addEventListener("transitionend", settled);
+    return () => {
+      window.removeEventListener("resize", again);
+      window.removeEventListener("orientationchange", again);
+      document.removeEventListener("transitionend", settled);
+    };
+  }, [measureCue]);
 
   const stepCue = useCallback(
     (delta: number) => {
