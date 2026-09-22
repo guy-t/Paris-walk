@@ -39,8 +39,14 @@ export function StatTile({ label, value, detail, alert, onClick }: StatTileProps
 }
 
 export interface StatStripProps {
-  /** Label/value pairs, shown in a horizontally scrolling strip. */
-  stats: readonly (readonly [label: string, value: string])[];
+  /**
+   * Label/value pairs, shown in a horizontally scrolling strip.
+   *
+   * The optional third string is a line under the value, for a number that
+   * cannot be read without knowing where it came from — an altitude, say,
+   * which is one thing from the GPS and another from a barometer.
+   */
+  stats: readonly (readonly [label: string, value: string, detail?: string])[];
 }
 
 /**
@@ -53,10 +59,13 @@ export interface StatStripProps {
 export function StatStrip({ stats }: StatStripProps) {
   return (
     <div className="strip">
-      {stats.map(([k, v]) => (
+      {stats.map(([k, v, detail]) => (
         <div className="tile" key={k}>
           <div className="k">{k}</div>
-          <div className="v">{v}</div>
+          <div className="v">
+            {v}
+            {detail ? <small>{detail}</small> : null}
+          </div>
         </div>
       ))}
     </div>

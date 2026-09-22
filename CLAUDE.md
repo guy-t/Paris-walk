@@ -22,7 +22,7 @@ packages/core     geometry, map-matching, the GPS tracker, sessions, GPX,
                   sun times, Overpass and Wikipedia clients, offline tiles,
                   the forecast client, the barometric maths and the route-notes parser.
                   No React, no Leaflet, no DOM beyond the browser APIs that
-                  are the point. 296 unit tests.
+                  are the point. 303 unit tests.
 packages/ui       MapView, ElevationProfile, Sheet, StatTile, Toast, and the
                   geolocation / wake-lock / service-worker hooks.
 apps/web          one Vite app, one HTML entry per guide, two build targets.
@@ -286,6 +286,59 @@ otherwise every 20 seconds, so switching lines mid-walk dropped whatever had
 accrued since the last one — visible in the measurement above as a stored
 `maxProg` of 0 before the swap and 3342 after it.
 
+**The sheet has to fit, and it did not.** `flex-shrink: 0` with
+`max-height: 58vh` asked for 429px of a 740px phone while the header (56) and
+dashboard (269) took 325 and the map refused to go under its 160px minimum.
+56+269+160+429 = 914, `#app` clips its overflow, and the bottom third of the
+sheet was simply off the screen — the list still scrolled, but its last rows
+could never be reached and there was no visible bottom edge to say why.
+Reported from the hill as "can't scroll", against both the route notes and
+the water list. The sheet shrinks now; the map gives up most of its minimum
+while the sheet is open (`body.sheet-open`), and the dashboard gives up its
+profile and stat strip, which nobody reads while following an instruction.
+Measured at 360×740: 167px of clipped list before, 274px of reachable list
+after, nothing hanging off the bottom. Any new fixed height in that column
+has to be checked the same way — the clipping is silent.
+
+**A cue read off the distance walked needs a manual override.** `stepAt`
+picks the last instruction at or behind the walker, which is right until the
+walk and the notes part company: a missed turn, a stretch covered with the
+screen off, a variant taken that the app was not told about. Reported from
+the hill: the cue sat on `[D]` for a long time with no way to move it on,
+which is the worst case, because the single instruction on the screen is
+then confidently wrong. The arrows hold a step of the walker's choosing; the
+hold is released by the walk catching up with it or by the button that says
+so, never silently, since a cue that sprang back mid-read would be worse
+than one that is stuck. The cue also says where its instruction is —
+"in 10 m", "1.8 km back" — so a stalled one looks stalled.
+
+`stepAt` also returned nothing at all before the first instruction. The
+notes are fitted to the measured line, so step one lands a few metres along
+rather than at zero: day 1's is at 10 m, and the header was blank until the
+walker had left the bridge in Potes. It falls back to the first step now.
+
+**Two altitudes, and only one of them said so.** The dashboard tile showed
+the GPS's; the weather tab showed the barometer's. A GPS fix is routinely
+10–30 m out vertically, which is the whole reason the barometer is read, so
+the dashboard prefers it — but only when calibrated, because an uncalibrated
+pressure altitude can be a couple of hundred metres out and must never be
+presented as a position. The tile names its source (`barometer`, `GPS`,
+`from the map`). Measured with a stubbed forecast and a fake sensor: both
+screens read 304 m.
+
+**Offline stopped one zoom short, and the map asked for what it lacked.**
+`sourceForProvider` capped downloads at z16 while the Spanish IGN serves
+genuine detail to 17, and the map was handed the provider's own
+`maxNativeZoom`, so zooming in requested tiles the download had never been
+asked to save — a blank screen, reported from the hill. `OFFLINE_TOP_ZOOM`
+is 17 and both ends use it: the downloader fetches to it, and the map's
+`maxNativeZoom` is clamped to it so anything deeper upscales what is cached.
+Soft, never blank, which is the right way round here. Day 1 on the IGN goes
+from 432 tiles (9 MB) to 1217 (31 MB). 18 is deliberately not offered: four
+times the tiles again, about 3,900 for one day, for detail a 1:25,000 survey
+does not have — and on a volunteer server it would stop being the bounded
+download that makes caching acceptable at all.
+
 **Waypoint names can hide in an extension.** Garmin writes some points with
 no `<name>` at all and the label in
 `<extensions><label_text>`, which no reader is obliged to look at. Three of
@@ -320,7 +373,7 @@ Pages CDN caches 404s, so a path a deploy just added keeps answering 404.
 ```bash
 pnpm install
 pnpm typecheck          # tsc --build across all projects
-pnpm test               # vitest, 308 tests
+pnpm test               # vitest, 315 tests
 pnpm build              # web build for Pages
 pnpm --filter @slownav/web build:native   # payload for the APK
 pnpm --filter @slownav/web dev            # local dev server

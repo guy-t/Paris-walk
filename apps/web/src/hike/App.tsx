@@ -11,6 +11,7 @@ import {
   createFormatter,
   downloadGPX,
   getProvider,
+  OFFLINE_TOP_ZOOM,
   positionAt,
   project,
   records,
@@ -203,7 +204,10 @@ export function App() {
     document.body.classList.toggle("library", panel === "library");
     document.body.classList.toggle("settings", panel === "settings");
     document.body.classList.toggle("map-full", mapFull);
-  }, [panel, mapFull]);
+    // The map gives up most of its minimum height while the sheet is open,
+    // which is the only way the sheet can fit on a 740px screen at all.
+    document.body.classList.toggle("sheet-open", sheetOpen);
+  }, [panel, mapFull, sheetOpen]);
 
   const openHike = useCallback(
     (id: string) => {
@@ -367,7 +371,46 @@ export function App() {
     () => stepAt(noteSteps.filter((s) => s.variant === variant), state.progress),
     [noteSteps, variant, state.progress],
   );
-  const currentIndex = cue.current ? noteSteps.indexOf(cue.current) : -1;
+
+  /**
+   * The instruction on the header, which is usually the walk's but need not be.
+   *
+   * `stepAt` reads the step off the distance walked, and that is right until
+   * the walk and the notes part company — a turn missed, a stretch covered
+   * with the screen off, a variant taken that the app was not told about.
+   * Reported from the hill: the cue sat on `[D]` for a long time with no way
+   * to move it on, which is the worst version of this, because the one
+   * instruction on the screen is then confidently wrong.
+   *
+   * So the arrows hold a step of the walker's choosing. The hold is released
+   * by the walk catching up with it, or by the button that says so — never
+   * silently, because a cue that sprang back while being read would be worse
+   * than one that is stuck.
+   */
+  const [heldStep, setHeldStep] = useState<number | null>(null);
+  const shown = useMemo(() => noteSteps.filter((s) => s.variant === variant), [noteSteps, variant]);
+  const liveIndex = cue.current ? shown.indexOf(cue.current) : -1;
+  useEffect(() => setHeldStep(null), [state.hike, variant]);
+  useEffect(() => {
+    // The walk has reached what was being held: hand it back.
+    if (heldStep != null && liveIndex >= heldStep) setHeldStep(null);
+  }, [liveIndex, heldStep]);
+
+  const cueIndex = heldStep ?? liveIndex;
+  const cueStep = shown[cueIndex] ?? null;
+  const cueNext = shown[cueIndex + 1] ?? null;
+  // The list in the sheet scrolls to whatever the header is showing, so the
+  // arrows move both and the two never disagree about where the walker is.
+  const currentIndex = cueStep ? noteSteps.indexOf(cueStep) : -1;
+  const stepCue = useCallback(
+    (delta: number) => {
+      setHeldStep((held) => {
+        const from = held ?? liveIndex;
+        return Math.max(0, Math.min(shown.length - 1, from + delta));
+      });
+    },
+    [liveIndex, shown.length],
+  );
 
   /**
    * Choose which line of the day the walker is on.
@@ -412,6 +455,27 @@ export function App() {
   const paceFactor =
     hike.eta && hike.eta.toblerLeft > 0 ? hike.eta.seconds / hike.eta.toblerLeft : 1;
   const weather = useWeather(state.hike?.id ?? null, state.track, state.progress, paceFactor);
+
+  /**
+   * The altitude worth putting on the dashboard.
+   *
+   * Reported from the hill: the dashboard tile and the weather tab's
+   * barometer showed different numbers. They are different instruments — a
+   * GPS fix is routinely 10–30 m out vertically, which is why the barometer
+   * is read at all — but only one screen said so.
+   *
+   * Only a *calibrated* reading is preferred. Without a sea-level pressure to
+   * work from, a pressure altitude can be a couple of hundred metres out, and
+   * putting that on the dashboard as if it were a position is the one thing
+   * the barometer must never be allowed to do.
+   */
+  const betterAltitude = useMemo(
+    () =>
+      weather.barometer.calibrated && weather.barometer.altitudeM != null
+        ? { metres: weather.barometer.altitudeM, source: "barometer" }
+        : null,
+    [weather.barometer.calibrated, weather.barometer.altitudeM],
+  );
 
   const trail = useMemo(
     () => state.session?.trail.map((p) => [p[0], p[1]] as LatLon),
@@ -499,13 +563,49 @@ export function App() {
         </div>
       </header>
 
-      {cue.current && (
-        <div className={`cue${cue.current.notes.some((n) => n.warning) ? " warn" : ""}`}>
-          {cue.current.ref ? <strong className="note-ref">{cue.current.ref}</strong> : null}
-          <span className="cue-text">{cue.current.text}</span>
-          {cue.next?.prog != null && (
-            <span className="cue-dist">next {fmt.dist(cue.next.prog - state.progress)}</span>
-          )}
+      {cueStep && (
+        <div
+          className={`cue${cueStep.notes.some((n) => n.warning) ? " warn" : ""}${heldStep != null ? " held" : ""}`}
+        >
+          <button
+            className="cue-step"
+            onClick={() => stepCue(-1)}
+            disabled={cueIndex <= 0}
+            aria-label="Previous instruction"
+          >
+            ‹
+          </button>
+          {cueStep.ref ? <strong className="note-ref">{cueStep.ref}</strong> : null}
+          <span className="cue-text">{cueStep.text}</span>
+          <span className="cue-meta">
+            {/* Where this instruction is relative to the walker, not just
+                where the next one is. A cue that has stopped advancing then
+                says so — "1.8 km back" — instead of looking current. */}
+            {cueStep.prog != null && (
+              <span className="cue-dist">
+                {cueStep.prog >= state.progress
+                  ? `in ${fmt.dist(cueStep.prog - state.progress)}`
+                  : `${fmt.dist(state.progress - cueStep.prog)} back`}
+              </span>
+            )}
+            {heldStep != null ? (
+              <button className="cue-live" onClick={() => setHeldStep(null)}>
+                Back to live
+              </button>
+            ) : (
+              cueNext?.prog != null && (
+                <span className="cue-dist">next {fmt.dist(cueNext.prog - state.progress)}</span>
+              )
+            )}
+          </span>
+          <button
+            className="cue-step"
+            onClick={() => stepCue(1)}
+            disabled={cueIndex >= shown.length - 1}
+            aria-label="Next instruction"
+          >
+            ›
+          </button>
         </div>
       )}
 
@@ -554,6 +654,7 @@ export function App() {
           store.set("hike:compact", v);
         }}
         onScrub={hike.setPreview}
+        altitude={betterAltitude}
         tick={tick}
       />
 
@@ -568,7 +669,10 @@ export function App() {
           tileUrl={tiles ?? getProvider("opentopo").url}
           tileAttribution={provider.attribution}
           maxZoom={provider.maxZoom}
-          maxNativeZoom={provider.maxNativeZoom}
+          // Never ask for a tile "Prepare offline" would not have saved: past
+          // this the map upscales what is cached — soft, but never the blank
+          // screen that was reported from the hill.
+          maxNativeZoom={Math.min(provider.maxNativeZoom, OFFLINE_TOP_ZOOM)}
           imperialScale={settings.units === "imperial"}
           follow={follow}
           onUserPan={() => setFollow(false)}

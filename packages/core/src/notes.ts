@@ -414,6 +414,19 @@ export function placeSteps(
 }
 
 /** The step the walker is in, and the one after it. */
+/**
+ * The instruction the walker is on, and the one after it.
+ *
+ * `current` is the last step at or behind them — and, before they reach the
+ * first one, the first one. That fallback is not a nicety: a day's notes are
+ * fitted to the measured line, so the opening instruction lands a few metres
+ * along rather than at exactly zero, and without it the walk begins with the
+ * cue blank. Day 1's first step sits at 10 m, so the header said nothing at
+ * all until the walker had left the bridge in Potes.
+ *
+ * Showing a step that is still ahead is honest as long as the caller says so,
+ * which is why the cue reads "in 10 m" rather than implying you are there.
+ */
 export function stepAt(
   steps: readonly PlacedStep[],
   progress: number,
@@ -427,6 +440,10 @@ export function stepAt(
       next = s;
       break;
     }
+  }
+  if (!current && next) {
+    current = next;
+    next = placed[1] ?? null;
   }
   return { current, next };
 }

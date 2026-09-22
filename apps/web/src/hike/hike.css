@@ -154,8 +154,35 @@ header.bar .menu > button { min-height: 40px; padding: 8px 14px; font-size: 14px
 .leaflet-popup-content { margin: 10px 12px; font-size: 13px; line-height: 1.35; }
 
 /* ---------- sheet ---------- */
-.sheet { display: flex; flex-direction: column; flex-shrink: 0; background: var(--panel); border-top: 1px solid var(--line); box-shadow: 0 -4px 16px rgba(0,0,0,.06); z-index: 950; transition: max-height .25s ease; max-height: 52px; overflow: hidden; }
+/*
+ * The sheet must fit the screen, which it did not.
+ *
+ * `flex-shrink: 0` with `max-height: 58vh` asked for 429px of a 740px phone,
+ * while the header (56) and dashboard (269) took 325 and the map refused to
+ * go below its 160px minimum. 56+269+160+429 = 914 on a 740px screen, and
+ * `#app` clips its overflow, so the bottom 174px of the sheet — a third of
+ * it — was simply off the screen. The list inside still scrolled, but its
+ * last rows could never be reached and there was no visible bottom edge to
+ * say so. Route notes and the water list were both unreadable past halfway.
+ *
+ * So the sheet shrinks now, and the map gives up most of its minimum while
+ * the sheet is open: at that moment the walker is reading, and a strip of
+ * map is enough to keep their bearings.
+ */
+.sheet { display: flex; flex-direction: column; flex-shrink: 1; min-height: 52px; background: var(--panel); border-top: 1px solid var(--line); box-shadow: 0 -4px 16px rgba(0,0,0,.06); z-index: 950; transition: max-height .25s ease; max-height: 52px; overflow: hidden; }
 .sheet.open { max-height: 58vh; }
+body.sheet-open .mapwrap { min-height: 96px; }
+/*
+ * The dashboard gives up its two scrolling extras while the sheet is open.
+ *
+ * With the live cue on screen as well, a 740px phone had only 120px left for
+ * the sheet's contents — four lines of route notes. The profile and the stat
+ * strip are the parts nobody reads while following an instruction, and they
+ * are 148px of the 270; hidden, the notes get 322px instead. Everything
+ * glanceable stays: tracking state, the four tiles, the next waypoint. Close
+ * the sheet and they are back.
+ */
+body.sheet-open .dash .profile, body.sheet-open .dash .strip { display: none; }
 .sheet-head { position: relative; display: flex; align-items: center; gap: 10px; height: 52px; padding: 0 14px; cursor: pointer; user-select: none; flex-shrink: 0; }
 .sheet-head .grip { width: 36px; height: 4px; border-radius: 2px; background: #d4d4d4; position: absolute; left: 50%; transform: translateX(-50%); top: 6px; }
 .sheet-head h2 { font-size: 15px; margin: 0; flex: 1; }
@@ -284,6 +311,15 @@ body.map-full .dash { position: absolute; top: max(8px, env(safe-area-inset-top)
 .cue .cue-text { flex: 1; min-width: 0; line-height: 1.35; }
 .cue .cue-dist { font-variant-numeric: tabular-nums; color: var(--muted-strong); font-size: 12px; white-space: nowrap; }
 .cue.warn { background: #fef2f2; color: var(--warn); font-weight: 600; }
+/* Step through the notes by hand. Thumb-sized, because the one time this is
+   needed is when the walk and the notes have parted company — a missed turn,
+   a stretch walked with the screen off — and that is not the moment to be
+   aiming at a 24px glyph. */
+.cue .cue-step { flex: 0 0 auto; width: 40px; height: 40px; border: 1px solid var(--line-strong); background: var(--panel); color: var(--ink); border-radius: 10px; font-size: 18px; line-height: 1; display: grid; place-items: center; }
+.cue .cue-step:disabled { opacity: .35; }
+.cue.held { background: #fffbeb; box-shadow: inset 0 0 0 1px var(--amber); }
+.cue .cue-live { flex: 0 0 auto; border: 0; background: var(--amber); color: #fff; border-radius: 999px; padding: 6px 10px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.cue-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
 /* Which of the day's two routes is being walked. */
 .variants { display: flex; gap: 6px; margin-bottom: 10px; }
 .variants button { flex: 1; min-height: 40px; padding: 8px 10px; font-size: 13px; border: 1px solid var(--line-strong); background: var(--panel); color: var(--ink); border-radius: 999px; }
