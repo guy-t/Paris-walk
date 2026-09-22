@@ -88,10 +88,18 @@ fix-to-fix gaps. Summing raw fixes counts GPS jitter as movement, so a phone
 on a café table accrues a kilometre an hour and every average built on it is
 wrong.
 
-**GPS runs only while the page is visible.** That is not an oversight; the
-screen costs several times more than the GNSS chip. The recorded trail has
-gaps while the screen is off, and that is accepted — route position recovers
-from the first fix on resume.
+**GPS runs only while the page is visible — unless the walker asks
+otherwise.** That default is not an oversight; the screen costs several times
+more than the GNSS chip. The recorded trail has gaps while the screen is off,
+and that is accepted — route position recovers from the first fix on resume.
+
+`Settings → Keep recording with the screen off` swaps in the Android
+foreground service instead (`bgGps`, default off, and the row only appears
+where `backgroundTrackingAvailable()` says it can be done). The whole change
+is the watcher: `PositionWatcher.keepsRunningInBackground` tells
+`useGeolocation` not to stop on hide and not to reset the tracker on resume,
+because there was no gap to forget across. Nothing in the GPS logic, the
+session or the map knows which watcher it is talking to.
 
 **`vite.config.js` shadows `vite.config.ts`.** Vite resolves `.js` first, so a
 stray compiled config silently freezes the build. This happened: `tsc` emitted
@@ -144,6 +152,31 @@ calls `onNewIntent(getIntent())` from inside `super.onCreate()`, so an
 override sees the launch intent there as well as in `onCreate`. Without a
 guard, one tap on an attachment imports the route twice. `MainActivity` marks
 each intent with a `HANDLED` extra as it reads it.
+
+**The foreground service queues; it does not push.** While the app is hidden
+its JavaScript is not running to be called, so `TrackingService` holds what it
+collects and the web layer drains the queue — on a timer while visible, and
+immediately on becoming visible, which is the moment the backlog matters.
+Fixes come back oldest first and are folded in order, because the tracker
+reads a fix out of order as a jump down the route and back. Past 3000 held
+fixes every second one is dropped rather than the oldest: for a trail, half
+the resolution over the whole gap beats full resolution over the end of it.
+
+It is built on the framework's `LocationManager`, not Play Services — no new
+dependency, nothing added to the APK, nothing for CI to resolve, and the
+fused provider's cleverness is aimed at cars. `ACCESS_BACKGROUND_LOCATION` is
+deliberately *not* requested: a foreground service of type `location` started
+while the app is on screen keeps the ordinary while-in-use permission alive
+for as long as it runs, so asking for the background one would gain nothing
+and is a far larger thing to ask of someone.
+
+**A watch handle only means something to the watcher that made it.** Turning
+background recording off mid-walk left the foreground service running, with
+its notification and the GNSS chip, for the rest of the day. `stopWatch` used
+whatever watcher was current at the time — by then the new one — and handed
+it a handle belonging to the old: an object, to a watcher that takes a string
+id, which it ignored without complaint. The live watch is stored with its
+owning watcher now. Any future provider swap has the same trap.
 
 **`store.set` returns false; it does not throw.** A full quota or switched-off
 site data both land there. Ignoring the result is how a hike gets imported,
@@ -413,7 +446,7 @@ Pages CDN caches 404s, so a path a deploy just added keeps answering 404.
 ```bash
 pnpm install
 pnpm typecheck          # tsc --build across all projects
-pnpm test               # vitest, 326 tests
+pnpm test               # vitest, 332 tests
 pnpm build              # web build for Pages
 pnpm --filter @slownav/web build:native   # payload for the APK
 pnpm --filter @slownav/web dev            # local dev server
@@ -470,10 +503,18 @@ done by hand once — the settings API needs repo-admin rights the default
   the position matches the other variant's stretch and offer to switch, but
   being asked "are you on the hard one?" halfway up a muddy path is worse
   than choosing at the signpost.
-- Native sensors: step counter and background location. The seam is
-  `PositionWatcher` in `@slownav/ui` — swap the watcher, change nothing else.
-  The barometer is done: `SlowNavBarometer` in `MainActivity`, read through
-  `shared/barometer.ts`.
+- Native sensors: the step counter. The seam is `PositionWatcher` in
+  `@slownav/ui` — swap the watcher, change nothing else. The barometer is
+  done (`SlowNavBarometer` in `MainActivity`, read through
+  `shared/barometer.ts`), and so is background location
+  (`TrackingService`, read through `shared/geolocation.ts`), which is what
+  that seam was built for.
+- **Background recording has not been walked with yet.** It is verified
+  against a stubbed bridge in a browser — the service starts and stops with
+  the setting, survives the page being hidden, and every fix from the hidden
+  stretch lands in the trail in order — but no fixture proves what Android
+  does to a real foreground service in a pocket for six hours. Worth one
+  short walk with the screen off before relying on it for a day.
 - iOS gets neither the barometer nor "open with": both need document types
   and UTIs declaring in the Xcode project. Nothing breaks the iOS build.
 - The forecast is Android- and browser-wide, but the barometer half of the

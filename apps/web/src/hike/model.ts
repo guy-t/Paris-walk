@@ -45,6 +45,15 @@ export interface HikeSettings {
    * setting off is exactly the kind of thing you remember an hour later.
    */
   gpsOnOpen: boolean;
+  /**
+   * Keep recording with the screen off, on the Android shell that can.
+   *
+   * Off by default, and deliberately so: it runs a foreground service with a
+   * notification and keeps the GNSS chip awake, which is a real cost in
+   * battery on a day that has to last to the hotel. The walker who wants a
+   * complete trail can have it; nobody gets it without asking.
+   */
+  bgGps: boolean;
 }
 
 /**
@@ -67,6 +76,7 @@ export const DEFAULT_SETTINGS: HikeSettings = {
   provider: DEFAULT_PROVIDER_ID,
   showSights: true,
   gpsOnOpen: true,
+  bgGps: false,
 };
 
 export function loadSettings(): HikeSettings {

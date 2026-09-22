@@ -81,6 +81,12 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
+
+        <service
+            android:name=".TrackingService"
+            android:exported="false"
+            android:foregroundServiceType="location" />
+
     </application>
 
     <!-- Permissions -->
@@ -99,6 +105,21 @@
 
     <!-- Keeps the screen awake while tracking, behind the menu toggle. -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!--
+      Recording the walk with the screen off.
+
+      A foreground service of type `location`, started while the app is on
+      screen, keeps the ordinary while-in-use location permission alive for as
+      long as it runs — so ACCESS_BACKGROUND_LOCATION is deliberately absent.
+      It would gain nothing here and is a far larger thing to ask of someone.
+
+      POST_NOTIFICATIONS is for the notification the service must show; the
+      service still runs if it is refused, it is simply not seen.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- The off-track buzz. -->
     <uses-permission android:name="android.permission.VIBRATE" />

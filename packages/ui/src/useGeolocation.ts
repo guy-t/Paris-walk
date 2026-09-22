@@ -53,6 +53,15 @@ export interface WatchOptions {
 export interface PositionWatcher {
   /** True if this provider can work here at all. */
   available(): boolean;
+  /**
+   * True when fixes keep arriving with the app hidden.
+   *
+   * A watcher that does not — every browser one — is stopped when the page
+   * hides, because the screen is off and a fix nobody is looking at costs
+   * battery for nothing. One that does is left alone, and is not told to
+   * forget its history on resume either: there was no gap to forget across.
+   */
+  keepsRunningInBackground?: boolean;
   /** Start watching. The returned handle is passed back to `clear`. */
   watch(
     onFix: (fix: Fix) => void,
@@ -128,8 +137,17 @@ export function useGeolocation({
   const [status, setStatus] = useState<GeolocationStatus>("off");
   const [visible, setVisible] = useState(() => !document.hidden);
 
-  /** The live watch handle, or a promise for one that has not resolved yet. */
-  const handle = useRef<Promise<unknown> | null>(null);
+  /**
+   * The live watch, and the watcher that owns it.
+   *
+   * Both, because a handle only means something to the provider that made
+   * it. Clearing with whatever watcher happens to be current is how turning
+   * background recording off mid-walk left the foreground service running:
+   * the handle was an object the Android watcher understood, handed to the
+   * Capacitor one, which takes a string id and quietly ignored it. A
+   * notification and the GNSS chip stayed up for the rest of the day.
+   */
+  const handle = useRef<{ watcher: PositionWatcher; pending: Promise<unknown> } | null>(null);
 
   // Held in refs so starting and stopping the watch never depends on a
   // callback identity, which would restart the GPS on every render.
@@ -143,16 +161,17 @@ export function useGeolocation({
   watcherRef.current = watcher;
 
   const stopWatch = useCallback(() => {
-    const pending = handle.current;
+    const live = handle.current;
     handle.current = null;
     // The handle may still be in flight; clear it once it exists, so a stop
     // issued immediately after a start cannot leave a watch running.
-    void pending?.then((h) => watcherRef.current.clear(h)).catch(() => {});
+    void live?.pending.then((h) => live.watcher.clear(h)).catch(() => {});
   }, []);
 
   const startWatch = useCallback(() => {
     if (handle.current) return;
-    handle.current = watcherRef.current.watch(
+    const watcher = watcherRef.current;
+    const pending = watcher.watch(
       (fix) => {
         setStatus("live");
         onFixRef.current(fix);
@@ -170,7 +189,8 @@ export function useGeolocation({
       },
       { enableHighAccuracy, maximumAge, timeout },
     );
-    void handle.current.catch((e: unknown) => {
+    handle.current = { watcher, pending };
+    void pending.catch((e: unknown) => {
       handle.current = null;
       setStatus("denied");
       onErrorRef.current?.(
@@ -217,6 +237,10 @@ export function useGeolocation({
       const nowVisible = !document.hidden;
       setVisible(nowVisible);
       if (!tracking) return;
+      // A watcher that carries on in the background is left running, and
+      // the tracker is not reset: the fixes from the hidden stretch are
+      // about to arrive, and a heading derived across them is real.
+      if (watcherRef.current.keepsRunningInBackground) return;
       if (nowVisible) {
         onResumeRef.current?.();
         setStatus("starting");
@@ -229,6 +253,22 @@ export function useGeolocation({
     document.addEventListener("visibilitychange", onVisibility);
     return () => document.removeEventListener("visibilitychange", onVisibility);
   }, [tracking, startWatch, stopWatch]);
+
+  // Swap providers without stopping the walk.
+  //
+  // The background setting changes which watcher this is, and a walker who
+  // turns it on at a col expects it to take effect there rather than at the
+  // next hotel. Compared by identity: `positionWatcher` returns the same
+  // object for the same setting, so this fires only on a real change.
+  const previous = useRef(watcher);
+  useEffect(() => {
+    if (previous.current === watcher) return;
+    previous.current = watcher;
+    if (!tracking) return;
+    stopWatch();
+    setStatus("starting");
+    startWatch();
+  }, [watcher, tracking, startWatch, stopWatch]);
 
   // Never leave a watch running behind an unmounted component.
   useEffect(() => stopWatch, [stopWatch]);

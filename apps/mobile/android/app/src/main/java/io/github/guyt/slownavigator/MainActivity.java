@@ -71,6 +71,7 @@ public class MainActivity extends BridgeActivity {
         super.onCreate(savedInstanceState);
         getBridge().getWebView().addJavascriptInterface(new OpenedFiles(), "SlowNavFiles");
         getBridge().getWebView().addJavascriptInterface(barometer, "SlowNavBarometer");
+        getBridge().getWebView().addJavascriptInterface(new Tracking(), "SlowNavTracking");
         // Whatever launched us, if anything. The web layer collects it once
         // it has loaded; there is nothing to notify yet.
         readFrom(getIntent());
@@ -268,6 +269,60 @@ public class MainActivity extends BridgeActivity {
             } catch (JSONException e) {
                 return null;
             }
+        }
+    }
+
+    /**
+     * Starting and stopping the recording that survives the screen going off.
+     *
+     * The service itself is in TrackingService; this is only the handle the
+     * web layer holds it by. Start is refused unless the activity is on
+     * screen, which is both what Android requires of a foreground service
+     * and what keeps the permission an ordinary while-in-use one.
+     */
+    public class Tracking {
+        /** Whether this shell can record in the background at all. */
+        @JavascriptInterface
+        public boolean available() {
+            return true;
+        }
+
+        @JavascriptInterface
+        public boolean running() {
+            return TrackingService.isRunning();
+        }
+
+        /** Begin recording. Returns false if Android refused, so the app can say so. */
+        @JavascriptInterface
+        public boolean start() {
+            try {
+                Intent intent = new Intent(MainActivity.this, TrackingService.class);
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                    startForegroundService(intent);
+                } else {
+                    startService(intent);
+                }
+                return true;
+            } catch (Exception e) {
+                Log.w(TAG, "could not start background tracking", e);
+                return false;
+            }
+        }
+
+        @JavascriptInterface
+        public void stop() {
+            try {
+                stopService(new Intent(MainActivity.this, TrackingService.class));
+            } catch (Exception e) {
+                Log.w(TAG, "could not stop background tracking", e);
+            }
+            TrackingService.discard();
+        }
+
+        /** Every fix collected since the last call, oldest first. */
+        @JavascriptInterface
+        public String drain() {
+            return TrackingService.drain();
         }
     }
 
