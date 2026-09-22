@@ -101,6 +101,24 @@ export function App() {
   const [panel, setPanel] = useState<Panel>("none");
   const [menuOpen, setMenuOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
+  /**
+   * A long instruction takes the dashboard's extras rather than being cut.
+   *
+   * The test is the cue's content against the room it gets with the
+   * dashboard whole — which is only measurable while it *is* whole, so it is
+   * remembered and reused once the extras are hidden. That is what keeps
+   * this from oscillating: hiding the profile gives the cue more room, and
+   * asking "does it fit now?" would immediately answer yes and put the
+   * profile back, every frame.
+   *
+   * Measured rather than a threshold, because the right threshold is
+   * different on every screen: a 900px phone has room for the longest of
+   * these notes and should keep its profile, a 560px one does not and should
+   * not.
+   */
+  const cueRef = useRef<HTMLDivElement>(null);
+  const cueRoom = useRef(Infinity);
+  const [cueTall, setCueTall] = useState(false);
   const [tab, setTab] = useState<NearbyTab>("nearby");
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [compact, setCompact] = useState(() => store.get<boolean>("hike:compact") === true);
@@ -210,7 +228,8 @@ export function App() {
     // The map gives up most of its minimum height while the sheet is open,
     // which is the only way the sheet can fit on a 740px screen at all.
     document.body.classList.toggle("sheet-open", sheetOpen);
-  }, [panel, mapFull, sheetOpen]);
+    document.body.classList.toggle("cue-tall", cueTall);
+  }, [panel, mapFull, sheetOpen, cueTall]);
 
   const openHike = useCallback(
     (id: string) => {
@@ -412,12 +431,33 @@ export function App() {
    */
   const [drag, setDrag] = useState(0);
   const swipe = useRef<{ x: number; y: number; at: number } | null>(null);
+
   const cueIndex = heldStep ?? liveIndex;
   const cueStep = shown[cueIndex] ?? null;
   const cueNext = shown[cueIndex + 1] ?? null;
   // The list in the sheet scrolls to whatever the header is showing, so the
   // arrows move both and the two never disagree about where the walker is.
   const currentIndex = cueStep ? noteSteps.indexOf(cueStep) : -1;
+
+  useEffect(() => {
+    const el = cueRef.current;
+    if (!el) {
+      setCueTall(false);
+      return;
+    }
+    const check = () => {
+      // Only while the dashboard is whole does the cue's box show what it
+      // would get without this; once the extras are hidden that number is
+      // the answer to a different question.
+      if (!document.body.classList.contains("cue-tall")) cueRoom.current = el.clientHeight;
+      setCueTall(el.scrollHeight > cueRoom.current);
+    };
+    check();
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [cueStep]);
+
   const stepCue = useCallback(
     (delta: number) => {
       setHeldStep((held) => {
@@ -617,6 +657,7 @@ export function App() {
 
       {cueStep && (
         <div
+          ref={cueRef}
           className={`cue${cueStep.notes.some((n) => n.warning) ? " warn" : ""}${heldStep != null ? " held" : ""}`}
           // Swiped, not tapped — but still reachable from a keyboard, which
           // is all the arrow buttons were doing for anyone who needed them.

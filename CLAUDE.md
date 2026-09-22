@@ -384,6 +384,25 @@ for the next, the way a page turns; the hold is released by the walk catching
 up with it or by the one button on the cue, never silently, since a cue that
 sprang back mid-read would be worse than one that is stuck.
 
+**The cue is as tall as its instruction**, and the map yields to make it so.
+`overflow: hidden`, added so the card could slide cleanly under a swipe, also
+drops a flex item's automatic minimum size from its content to zero — so the
+cue became the only thing in the column that could be squashed, the map being
+pinned at a 160px floor, and it absorbed the shortfall by cutting the last
+lines off the instruction. Silently: three of day 1's notes lost up to 33px,
+two lines of the sentence saying where to turn. The map's floor is 96px now
+and only binds when the column is short; when an instruction still will not
+fit, the dashboard's profile and stat strip step aside, as they already do
+for the sheet.
+
+That last test is a measurement, not a threshold, because the right threshold
+differs on every screen. It compares the cue's content against the room it
+gets *with the dashboard whole*, which is only observable while it is whole —
+so the number is remembered and reused once the extras are hidden. Asking
+"does it fit now?" instead would answer yes the moment the profile went, and
+put it back, every frame. Measured across 360×900, 740, 640 and 560: the
+longest of these four days' notes (217px) shows in full at all of them.
+
 It was two 40px arrows before, either side of the one thing on screen worth
 reading: a third of the width of a 360px phone spent on chrome, on the line
 a walker has to take in at a junction. The instruction has the full width
