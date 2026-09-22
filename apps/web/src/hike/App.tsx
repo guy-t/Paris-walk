@@ -35,7 +35,7 @@ import {
   useWakeLock,
   type MapMarker,
 } from "@slownav/ui";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Dashboard } from "./Dashboard.js";
 import { LibraryPanel } from "./LibraryPanel.js";
 import { NearbySheet, tabForSight, type NearbyTab } from "./NearbySheet.js";
@@ -101,6 +101,23 @@ export function App() {
   const [panel, setPanel] = useState<Panel>("none");
   const [menuOpen, setMenuOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
+  /**
+   * A long instruction takes the dashboard's extras rather than being cut.
+   *
+   * Measured rather than compared against a threshold, because the right
+   * threshold differs on every screen: a 900px phone has room for the
+   * longest of these notes and should keep its elevation profile, a 560px
+   * one has not and should spend it.
+   *
+   * The measurement has to be taken with the dashboard whole, or it reads
+   * the layout this very decision produced — so each one starts by putting
+   * the extras back, lets that paint, and only then asks whether the
+   * instruction fits. Caching the answer instead looked simpler and was
+   * wrong: the first reading landed in a transient layout and stuck, hiding
+   * the profile on a screen with room to spare.
+   */
+  const cueRef = useRef<HTMLDivElement>(null);
+  const [cueTall, setCueTall] = useState(false);
   const [tab, setTab] = useState<NearbyTab>("nearby");
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [compact, setCompact] = useState(() => store.get<boolean>("hike:compact") === true);
@@ -210,7 +227,8 @@ export function App() {
     // The map gives up most of its minimum height while the sheet is open,
     // which is the only way the sheet can fit on a 740px screen at all.
     document.body.classList.toggle("sheet-open", sheetOpen);
-  }, [panel, mapFull, sheetOpen]);
+    document.body.classList.toggle("cue-tall", cueTall);
+  }, [panel, mapFull, sheetOpen, cueTall]);
 
   const openHike = useCallback(
     (id: string) => {
@@ -399,12 +417,86 @@ export function App() {
     if (heldStep != null && liveIndex >= heldStep) setHeldStep(null);
   }, [liveIndex, heldStep]);
 
+  /**
+   * Stepping by swipe rather than by buttons.
+   *
+   * The arrows were two 40px targets either side of the one thing on the
+   * screen worth reading, on a line the walker has to take in at a junction.
+   * A swipe costs no width at all, and the text can have the lot.
+   *
+   * Dragged live rather than snapping on release: the card following the
+   * thumb is the whole affordance, since nothing on screen now says the
+   * gesture exists. Damped past the threshold so it never slides off.
+   */
+  const [drag, setDrag] = useState(0);
+  const swipe = useRef<{ x: number; y: number; at: number } | null>(null);
+
   const cueIndex = heldStep ?? liveIndex;
   const cueStep = shown[cueIndex] ?? null;
   const cueNext = shown[cueIndex + 1] ?? null;
   // The list in the sheet scrolls to whatever the header is showing, so the
   // arrows move both and the two never disagree about where the walker is.
   const currentIndex = cueStep ? noteSteps.indexOf(cueStep) : -1;
+
+  // The next-waypoint row is what the dashboard had before there was a cue.
+  // With one on screen it is a second answer to the same question, one row
+  // lower and less specific. Set here rather than with the other body
+  // classes because it depends on the cue, which is worked out below them.
+  useEffect(() => {
+    document.body.classList.toggle("has-cue", cueStep != null);
+  }, [cueStep]);
+
+  const measureCue = useCallback(() => {
+    const el = cueRef.current;
+    if (!el) return;
+    // Take the class off, read, put it back: reading a layout property
+    // forces the browser to recompute, so this sees the room the cue would
+    // have with the dashboard whole, in one pass and without a frame in
+    // between for anything to be painted in. Going through React and a
+    // requestAnimationFrame instead is a race — the frame can arrive before
+    // the state has committed, and then the reading is of the layout this
+    // decision produced rather than of the one it needs.
+    const was = document.body.classList.contains("cue-tall");
+    document.body.classList.remove("cue-tall");
+    const fits = el.scrollHeight <= el.clientHeight;
+    if (was) document.body.classList.add("cue-tall");
+    setCueTall(!fits);
+  }, []);
+
+  /**
+   * Re-measured whenever the cue's ceiling could have moved.
+   *
+   * Every trigger here is state this component already holds, which is the
+   * point: watching the dashboard's size instead would catch the change this
+   * very decision causes, and flap. The sheet is in the list because opening
+   * it takes the profile away too — a measurement from that moment said the
+   * instruction fitted, and it was still saying so long after the sheet had
+   * closed and taken the room back.
+   */
+  useEffect(() => {
+    if (panel !== "none") return;
+    measureCue();
+  }, [cueStep, sheetOpen, compact, mapFull, panel, measureCue]);
+
+  useEffect(() => {
+    const again = () => measureCue();
+    // The sheet's height is animated, so a measurement taken when it opens
+    // or closes reads a layout that is still moving — 19px of cue, in the
+    // middle of a 250ms transition, which says nothing fits and then stands
+    // for the rest of the walk. This is the one that gets it right.
+    const settled = (e: TransitionEvent) => {
+      if (e.propertyName === "max-height") measureCue();
+    };
+    window.addEventListener("resize", again);
+    window.addEventListener("orientationchange", again);
+    document.addEventListener("transitionend", settled);
+    return () => {
+      window.removeEventListener("resize", again);
+      window.removeEventListener("orientationchange", again);
+      document.removeEventListener("transitionend", settled);
+    };
+  }, [measureCue]);
+
   const stepCue = useCallback(
     (delta: number) => {
       setHeldStep((held) => {
@@ -413,6 +505,42 @@ export function App() {
       });
     },
     [liveIndex, shown.length],
+  );
+
+  /** Past this, in pixels, a drag was meant as a swipe. */
+  const SWIPE_MIN = 44;
+
+  const onCuePointerDown = useCallback((e: ReactPointerEvent) => {
+    swipe.current = { x: e.clientX, y: e.clientY, at: Date.now() };
+  }, []);
+
+  const onCuePointerMove = useCallback((e: ReactPointerEvent) => {
+    const from = swipe.current;
+    if (!from) return;
+    const dx = e.clientX - from.x;
+    // A vertical gesture belongs to the page, not to the cue: let it go the
+    // moment it looks like one, rather than fighting a scroll.
+    if (Math.abs(e.clientY - from.y) > Math.abs(dx)) {
+      swipe.current = null;
+      setDrag(0);
+      return;
+    }
+    // Damped beyond the threshold, so the end of the notes feels like an end.
+    setDrag(Math.abs(dx) <= SWIPE_MIN ? dx : Math.sign(dx) * (SWIPE_MIN + (Math.abs(dx) - SWIPE_MIN) * 0.3));
+  }, []);
+
+  const onCuePointerUp = useCallback(
+    (e: ReactPointerEvent) => {
+      const from = swipe.current;
+      swipe.current = null;
+      setDrag(0);
+      if (!from) return;
+      const dx = e.clientX - from.x;
+      if (Math.abs(dx) < SWIPE_MIN || Math.abs(e.clientY - from.y) > Math.abs(dx)) return;
+      // Left takes you forward, the way a page turns.
+      stepCue(dx < 0 ? 1 : -1);
+    },
+    [stepCue],
   );
 
   /**
@@ -568,29 +696,45 @@ export function App() {
 
       {cueStep && (
         <div
+          ref={cueRef}
           className={`cue${cueStep.notes.some((n) => n.warning) ? " warn" : ""}${heldStep != null ? " held" : ""}`}
+          // Swiped, not tapped — but still reachable from a keyboard, which
+          // is all the arrow buttons were doing for anyone who needed them.
+          role="group"
+          aria-label={`Instruction ${cueIndex + 1} of ${shown.length}`}
+          tabIndex={0}
+          onPointerDown={onCuePointerDown}
+          onPointerMove={onCuePointerMove}
+          onPointerUp={onCuePointerUp}
+          onPointerCancel={() => {
+            swipe.current = null;
+            setDrag(0);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "ArrowRight") stepCue(1);
+            else if (e.key === "ArrowLeft") stepCue(-1);
+            else return;
+            e.preventDefault();
+          }}
         >
-          <button
-            className="cue-step"
-            onClick={() => stepCue(-1)}
-            disabled={cueIndex <= 0}
-            aria-label="Previous instruction"
+          <div
+            className={`cue-body${drag !== 0 ? " dragging" : ""}`}
+            style={{ transform: `translateX(${drag}px)` }}
           >
-            ‹
-          </button>
-          {cueStep.ref ? <strong className="note-ref">{cueStep.ref}</strong> : null}
-          <span className="cue-text">{cueStep.text}</span>
-          <span className="cue-meta">
+            {cueStep.ref ? <strong className="note-ref">{cueStep.ref}</strong> : null}
+            <span className="cue-text">{cueStep.text}</span>
+          </div>
+          <div className="cue-foot">
             {/* Where this instruction is relative to the walker, not just
                 where the next one is. A cue that has stopped advancing then
                 says so — "1.8 km back" — instead of looking current. */}
-            {cueStep.prog != null && (
-              <span className="cue-dist">
-                {cueStep.prog >= state.progress
+            <span className="cue-dist">
+              {cueStep.prog == null
+                ? "not on this line"
+                : cueStep.prog >= state.progress
                   ? `in ${fmt.dist(cueStep.prog - state.progress)}`
                   : `${fmt.dist(state.progress - cueStep.prog)} back`}
-              </span>
-            )}
+            </span>
             {heldStep != null ? (
               <button className="cue-live" onClick={() => setHeldStep(null)}>
                 Back to live
@@ -600,15 +744,7 @@ export function App() {
                 <span className="cue-dist">next {fmt.dist(cueNext.prog - state.progress)}</span>
               )
             )}
-          </span>
-          <button
-            className="cue-step"
-            onClick={() => stepCue(1)}
-            disabled={cueIndex >= shown.length - 1}
-            aria-label="Next instruction"
-          >
-            ›
-          </button>
+          </div>
         </div>
       )}
 

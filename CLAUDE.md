@@ -379,11 +379,59 @@ walk and the notes part company: a missed turn, a stretch covered with the
 screen off, a variant taken that the app was not told about. Reported from
 the hill: the cue sat on `[D]` for a long time with no way to move it on,
 which is the worst case, because the single instruction on the screen is
-then confidently wrong. The arrows hold a step of the walker's choosing; the
-hold is released by the walk catching up with it or by the button that says
-so, never silently, since a cue that sprang back mid-read would be worse
-than one that is stuck. The cue also says where its instruction is —
-"in 10 m", "1.8 km back" — so a stalled one looks stalled.
+then confidently wrong. A swipe holds a step of the walker's choosing — left
+for the next, the way a page turns; the hold is released by the walk catching
+up with it or by the one button on the cue, never silently, since a cue that
+sprang back mid-read would be worse than one that is stuck.
+
+**The cue is as tall as its instruction**, and the map yields to make it so.
+`overflow: hidden`, added so the card could slide cleanly under a swipe, also
+drops a flex item's automatic minimum size from its content to zero — so the
+cue became the only thing in the column that could be squashed, the map being
+pinned at a 160px floor, and it absorbed the shortfall by cutting the last
+lines off the instruction. Silently: three of day 1's notes lost up to 33px,
+two lines of the sentence saying where to turn. The map's floor is 96px now
+and only binds when the column is short; when an instruction still will not
+fit, the dashboard's profile and stat strip step aside, as they already do
+for the sheet.
+
+The next-waypoint row goes too whenever a cue is showing (`body.has-cue`).
+It was the dashboard's answer to "what is coming" before the route notes
+existed; the cue answers it better, with the instruction rather than the name
+of the next dot, and one row higher. It returns for a hike with no notes
+imported, where it is the only answer there is.
+
+That fit test is a measurement, not a threshold, because the right threshold
+differs on every screen. It takes the class off, reads, and puts it back in
+one pass — reading a layout property forces the recompute, so what it sees is
+the room the cue would have with the dashboard whole, and no frame passes for
+anything to be painted in. Going through React and a `requestAnimationFrame`
+instead is a race: the frame can arrive before the state has committed, and
+then the reading is of the layout this very decision produced.
+
+What it must not do is measure a layout that is still moving. Every trigger
+is state the component already holds — the step, the sheet, compact,
+map-full, the panel — plus `resize` and, crucially, the sheet's
+`transitionend`. The sheet animates its `max-height` over 250ms, and a
+measurement taken during that reads 19px of cue, concludes nothing fits, and
+stands for the rest of the walk. Watching the dashboard's own size instead
+would be worse still: that is the thing this decision changes, so it flaps.
+
+Measured across 360×900, 740, 640 and 560, stepping every instruction of
+day 1: the longest note (217px) shows in full at all four, the profile is
+kept at 900 and 740 where there is room and spent at 640 and 560 where there
+is not.
+
+It was two 40px arrows before, either side of the one thing on screen worth
+reading: a third of the width of a 360px phone spent on chrome, on the line
+a walker has to take in at a junction. The instruction has the full width
+now, and everything about it sits on a second line — where it is ("in 10 m",
+"1.8 km back", so a stalled cue looks stalled), and either the next one's
+distance or `Back to live`. The card follows the thumb while dragging and
+springs back from a short drag, which is the whole affordance now that
+nothing on screen says the gesture exists; `touch-action: pan-y` keeps the
+page's vertical scrolling. Arrow keys still work, which is all the buttons
+were doing for anyone who needed them.
 
 `stepAt` also returned nothing at all before the first instruction. The
 notes are fitted to the measured line, so step one lands a few metres along
