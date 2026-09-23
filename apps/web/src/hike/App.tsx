@@ -66,6 +66,7 @@ import {
   saveVariant,
   type StoredNotes,
 } from "./notes.js";
+import { useSteps } from "./useSteps.js";
 import "./hike.css";
 
 /** Keeps elapsed time and the moving average ticking between GPS fixes. */
@@ -595,6 +596,46 @@ export function App() {
     hike.eta && hike.eta.toblerLeft > 0 ? hike.eta.seconds / hike.eta.toblerLeft : 1;
   const weather = useWeather(state.hike?.id ?? null, state.track, state.progress, paceFactor);
 
+  const steps = useSteps({
+    tracking: gps.tracking,
+    enabled: settings.steps,
+    heldFor: state.mode === "gps" ? state.heldFor : 0,
+    dist: state.session?.dist ?? 0,
+  });
+
+  /**
+   * One buzz as each instruction becomes the current one.
+   *
+   * The cue answers "what now" better than anything else on the screen, and
+   * this is what makes it answerable without looking: a walker with the phone
+   * in a pocket gets told there is something to read, at the junction rather
+   * than fifty metres past it. Two pulses for a step carrying a warning,
+   * because CAREFUL deserves to be distinguishable from "turn R".
+   *
+   * Only forwards, and only while tracking. The preview slider walks the
+   * whole day in a second and would buzz its way through every instruction;
+   * a cue going backwards is the walk being re-matched, not a junction.
+   */
+  const buzzedAt = useRef<number | null>(null);
+  useEffect(() => {
+    buzzedAt.current = null;
+  }, [state.hike, variant]);
+  useEffect(() => {
+    if (state.mode !== "gps" || !settings.cueVib) {
+      buzzedAt.current = null;
+      return;
+    }
+    if (liveIndex < 0) return;
+    const was = buzzedAt.current;
+    buzzedAt.current = liveIndex;
+    // Nothing on the first instruction the walk lands on: there is no
+    // junction behind it, and a buzz as the app opens is only a surprise.
+    if (was == null || liveIndex <= was) return;
+    const step = shown[liveIndex];
+    if (!step) return;
+    navigator.vibrate?.(step.notes.some((n) => n.warning) ? [120, 90, 120] : [120]);
+  }, [liveIndex, shown, settings.cueVib, state.mode]);
+
   /**
    * The altitude worth putting on the dashboard.
    *
@@ -755,6 +796,16 @@ export function App() {
               <button className="cue-live" onClick={() => setHeldStep(null)}>
                 Back to live
               </button>
+            ) : stale ? (
+              // How far the step counter says the walker has come since the
+              // position was last known. It takes the slot "next 300 m" had,
+              // because that distance is measured from the stale position and
+              // means nothing while this one does. Offered, never applied: the
+              // walker swipes the cue on if it looks right.
+              steps.heldDistance != null &&
+              steps.heldDistance >= 50 && (
+                <span className="cue-dist stale">≈{fmt.dist(steps.heldDistance)} walked</span>
+              )
             ) : (
               cueNext?.prog != null && (
                 <span className="cue-dist">next {fmt.dist(cueNext.prog - state.progress)}</span>
@@ -810,6 +861,7 @@ export function App() {
         }}
         onScrub={hike.setPreview}
         altitude={betterAltitude}
+        steps={steps.available ? steps : null}
         tick={tick}
       />
 

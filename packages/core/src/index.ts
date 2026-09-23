@@ -12,6 +12,7 @@ export * from "./match.js";
 export * from "./track.js";
 export * from "./notes.js";
 export * from "./pressure.js";
+export * from "./pedometer.js";
 export * from "./weather.js";
 export * from "./sun.js";
 export * from "./gpx.js";

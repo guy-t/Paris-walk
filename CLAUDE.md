@@ -22,7 +22,7 @@ packages/core     geometry, map-matching, the GPS tracker, sessions, GPX,
                   sun times, Overpass and Wikipedia clients, offline tiles,
                   the forecast client, the barometric maths and the route-notes parser.
                   No React, no Leaflet, no DOM beyond the browser APIs that
-                  are the point. 260 unit tests.
+                  are the point. 270 unit tests.
 packages/ui       MapView, ElevationProfile, Sheet, StatTile, Toast, and the
                   geolocation / wake-lock / service-worker hooks.
 apps/web          one Vite app, one HTML entry per guide, two build targets.
@@ -48,13 +48,15 @@ importGpx.ts      one import path for the picker and for opened files
 notes.ts          route notes: per-hike storage, import, placement
 weather.ts        route sampling, arrival times, forecast cache
 useWeather.ts     forecast + barometer state for the weather tab
+useSteps.ts       the step counter: the day's total, cadence, and how far the
+                  walker has come since the route position was last known
 ```
 
 `apps/web/src/shared/` is what differs by platform, all feature-detected:
 `platform.ts` (native? which OS? the GPX picker's `accept`), `geolocation.ts`
 (the `PositionWatcher` seam), `openedFiles.ts` (routes opened from Files or
-an attachment), `barometer.ts` (the Android pressure sensor), `version.ts`
-(the build string).
+an attachment), `barometer.ts` (the Android pressure sensor), `steps.ts` (the
+Android step counter), `version.ts` (the build string).
 
 ## Migration state
 
@@ -471,6 +473,50 @@ carries the age of the route position, and past two minutes the cue's second
 line says `position 8 min old` in amber instead of a distance, with the
 dashboard's status line saying the same.
 
+**Steps are a distance, never a position.** The step counter is the one
+instrument in the phone that goes on measuring the walk when the satellites
+stop: TYPE_STEP_COUNTER is a hardware register that counts since the last
+reboot whether or not anything is listening, so it spans a pocket and a cliff
+alike. That is what it is here for — while the route position is held, it can
+say roughly how far the walker has come since it was last known, which is the
+other half of `heldFor`. The cue shows `position 10 min old · ≈730 m walked`,
+and the walker swipes the instruction on if that looks right. Nothing in the
+app ever moves the route position on it: steps measure ground covered, and a
+walker who took a wrong turn covered just as much. Same rule as the
+uncalibrated pressure altitude, for the same reason.
+
+The stride is measured, not asked for, by pairing the session's distance —
+metres of confident progress along the line, already filtered of jumps — with
+the steps over the same ten seconds. A sample outside 0.4–1.1 m a step is not
+a walker and is rejected rather than averaged in, which is what makes a held
+stretch (steps, no metres), a cable car (metres, no steps) and a re-sync all
+fall out on their own. It is stored per walker (`hike:stride`), so day 2
+starts calibrated. And `cadence` refuses a rate past 220 /min: a browser
+measurement read 11,005 steps a minute when the two numbers being divided did
+not belong to each other, which is exactly the nonsense a dashboard must not
+show.
+
+`settings.steps` is **off** by default, because from Android 10 the counter
+needs `ACTIVITY_RECOGNITION` — a runtime permission, so a question, and
+nobody is asked one they did not invite. Turning the row on is what asks; the
+row only appears where `stepCounterPresent()` says the sensor is there, and
+`available()` stays false until the answer comes back on the `slownav:steps`
+event. Unlike the barometer the listener is deliberately *not* unregistered
+in `onPause`: the register counts in hardware anyway, the listener costs tens
+of microamps, and what it buys is a count that spans the pocket — which is
+the whole point.
+
+**One buzz as each instruction becomes current** (`settings.cueVib`, on by
+default). It is the cheapest thing in the settings panel — no permission, no
+sensor, no measurable battery — and it means walking with the phone in a
+pocket and looking only when there is something to read, at the junction
+rather than fifty metres past it. Two pulses for a step carrying a warning,
+because CAREFUL should be distinguishable from "turn R" without looking.
+Forwards only and only while tracking: the preview slider walks a whole day
+in a second, and a cue moving backwards is the walk being re-matched, not a
+junction. Measured on the built app against day 1: 25 buzzes over 14.5 km,
+one of them the warning.
+
 **A cue read off the distance walked needs a manual override.** `stepAt`
 picks the last instruction at or behind the walker, which is right until the
 walk and the notes part company: a missed turn, a stretch covered with the
@@ -592,7 +638,7 @@ Pages CDN caches 404s, so a path a deploy just added keeps answering 404.
 ```bash
 pnpm install
 pnpm typecheck          # tsc --build across all projects
-pnpm test               # vitest, 347 tests
+pnpm test               # vitest, 357 tests
 pnpm build              # web build for Pages
 pnpm --filter @slownav/web build:native   # payload for the APK
 pnpm --filter @slownav/web dev            # local dev server
@@ -649,12 +695,15 @@ done by hand once — the settings API needs repo-admin rights the default
   the position matches the other variant's stretch and offer to switch, but
   being asked "are you on the hard one?" halfway up a muddy path is worse
   than choosing at the signpost.
-- Native sensors: the step counter. The seam is `PositionWatcher` in
-  `@slownav/ui` — swap the watcher, change nothing else. The barometer is
-  done (`SlowNavBarometer` in `MainActivity`, read through
-  `shared/barometer.ts`), and so is background location
-  (`TrackingService`, read through `shared/geolocation.ts`), which is what
-  that seam was built for.
+- **The step counter wants a walk.** The sensor, the permission, the stride
+  calibration and the held-position estimate are all verified against a
+  stubbed bridge in a browser — the tiles fill, the permission is asked once
+  and only on turning the row on, and ten minutes of 300 m fixes produces
+  `position 10 min old · ≈730 m walked` against 700 m actually covered. What
+  no fixture proves is what a real phone's counter does in a rucksack for six
+  hours, or whether the measured stride settles where it should on a
+  mountain. The other two native sensors are done and walked with: the
+  barometer (`SlowNavBarometer`) and background location (`TrackingService`).
 - **Background recording still wants a walk.** The first one found the
   network provider putting kilometre-wide fixes in the queue, which is
   fixed. The rest is verified against a stubbed bridge in a browser — the

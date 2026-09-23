@@ -121,8 +121,20 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <!-- The off-track buzz. -->
+    <!-- The off-track buzz, and the one at each instruction. -->
     <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!--
+      The step counter.
+
+      From Android 10 reading TYPE_STEP_COUNTER needs this, and it is a runtime
+      permission — so it is a question, and nobody is asked until they turn
+      "Count my steps" on in settings. The sensor is a hardware register that
+      counts whether or not anything is listening, which is why it is worth
+      asking for: it is the one measurement of the walk that survives a valley
+      with no sky.
+    -->
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
 
     <!--
       GPS hardware is preferred but not required: the app is still useful in
@@ -131,4 +143,5 @@
     -->
     <uses-feature android:name="android.hardware.location.gps" android:required="false" />
     <uses-feature android:name="android.hardware.sensor.barometer" android:required="false" />
+    <uses-feature android:name="android.hardware.sensor.stepcounter" android:required="false" />
 </manifest>
