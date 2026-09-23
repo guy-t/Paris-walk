@@ -103,6 +103,15 @@ export function backgroundTrackingAvailable(): boolean {
 const DRAIN_EVERY_MS = 2000;
 
 /**
+ * Stands in for an accuracy the provider would not state.
+ *
+ * Deliberately worse than any tracker's `weakAccuracy`, so such a fix is
+ * held rather than believed. The service drops these before they get here;
+ * this is the second lock on the same door.
+ */
+const UNKNOWN_ACCURACY = 9999;
+
+/**
  * Turn what the service handed back into fixes.
  *
  * Exported because this is the seam where a string crossing the Java/JS
@@ -136,7 +145,11 @@ export function parseFixes(raw: string | null | undefined): Fix[] {
     out.push({
       lat,
       lon,
-      accuracy: num("accuracy") ?? 50,
+      // A fix that does not say how good it is gets the benefit of no doubt
+      // at all. Calling it 50 m would tell the tracker it is worth acting
+      // on; UNKNOWN_ACCURACY is past every app's weak threshold, so the
+      // position shows and the walker is not moved along the route by it.
+      accuracy: num("accuracy") ?? UNKNOWN_ACCURACY,
       altitude: num("altitude"),
       speed: num("speed"),
       heading: num("heading"),

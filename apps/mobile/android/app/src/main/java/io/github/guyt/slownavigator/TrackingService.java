@@ -164,6 +164,9 @@ public class TrackingService extends Service {
         listener = new LocationListener() {
             @Override
             public void onLocationChanged(Location location) {
+                // A fix that will not say how good it is cannot be judged, and
+                // a GPS fix always says. Dropping it costs one reading.
+                if (!location.hasAccuracy()) return;
                 enqueue(toJson(location));
             }
 
@@ -183,19 +186,29 @@ public class TrackingService extends Service {
             }
         };
 
-        boolean any = false;
-        for (String provider : new String[] {LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER}) {
-            try {
-                if (!locations.isProviderEnabled(provider)) continue;
-                locations.requestLocationUpdates(
-                        provider, INTERVAL_MS, INTERVAL_M, listener, thread.getLooper());
-                any = true;
-            } catch (SecurityException | IllegalArgumentException e) {
-                Log.w(TAG, "could not use " + provider, e);
+        // The satellites, and nothing else.
+        //
+        // This asked NETWORK_PROVIDER as well, on the reasoning that another
+        // source of fixes could only help. It cannot: a network fix is
+        // trilaterated from cell towers and wifi, which in a valley with one
+        // tower on a ridge is kilometres out, and every one of them went into
+        // the queue beside the good ones. Reported from the hill as losing
+        // accuracy "by a km" with the setting on — and it was only the
+        // setting, because the foreground watcher asks for high accuracy,
+        // which is GPS alone. Turning background recording on must change
+        // whether fixes keep arriving, never what kind of fix they are.
+        try {
+            if (!locations.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+                Log.w(TAG, "GPS is switched off");
+                return false;
             }
+            locations.requestLocationUpdates(
+                    LocationManager.GPS_PROVIDER, INTERVAL_MS, INTERVAL_M, listener, thread.getLooper());
+            return true;
+        } catch (SecurityException | IllegalArgumentException e) {
+            Log.w(TAG, "could not use GPS", e);
+            return false;
         }
-        if (!any) Log.w(TAG, "no location provider is enabled");
-        return any;
     }
 
     private static JSONObject toJson(Location location) {
@@ -203,7 +216,11 @@ public class TrackingService extends Service {
         try {
             fix.put("lat", location.getLatitude());
             fix.put("lon", location.getLongitude());
-            fix.put("accuracy", location.hasAccuracy() ? location.getAccuracy() : 50);
+            // Never invented. Calling an unknown accuracy 50 m tells the
+            // tracker the fix is worth acting on, which is the one thing it
+            // must decide for itself — it holds anything vaguer than the
+            // spacing of the paths rather than moving the walker onto one.
+            if (location.hasAccuracy()) fix.put("accuracy", location.getAccuracy());
             if (location.hasAltitude()) fix.put("altitude", location.getAltitude());
             if (location.hasSpeed()) fix.put("speed", location.getSpeed());
             if (location.hasBearing()) fix.put("heading", location.getBearing());

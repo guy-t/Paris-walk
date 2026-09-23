@@ -170,6 +170,25 @@ while the app is on screen keeps the ordinary while-in-use permission alive
 for as long as it runs, so asking for the background one would gain nothing
 and is a far larger thing to ask of someone.
 
+**The satellites, and nothing else.** The service asked `NETWORK_PROVIDER`
+as well as GPS, on the reasoning that another source of fixes could only
+help. It cannot. A network fix is trilaterated from cell towers and wifi,
+which in a valley with one tower on a ridge is kilometres out, and every one
+of them went into the queue beside the good ones. Reported from the hill as
+losing accuracy "by a km" with background recording on — and it was only
+with it on, because the foreground watcher asks for high accuracy, which is
+GPS alone. Turning the setting on must change whether fixes keep arriving,
+never what kind of fix they are.
+
+The tracker's `weakAccuracy` (120 m for the hike) held most of them out of
+the route position, but a weak fix still moves the dot on the map, which is
+what a walker sees. And an accuracy was being *invented* — a fix that did
+not state one was called 50 m, on both sides of the bridge, which tells the
+tracker it is worth acting on. That is the one judgement the tracker has to
+make for itself. The service drops a fix with no stated accuracy now, and
+`parseFixes` gives anything that still arrives without one a value past
+every weak threshold, so it shows without moving the walker along the route.
+
 **A watch handle only means something to the watcher that made it.** Turning
 background recording off mid-walk left the foreground service running, with
 its notification and the GNSS chip, for the rest of the day. `stopWatch` used
@@ -494,7 +513,7 @@ Pages CDN caches 404s, so a path a deploy just added keeps answering 404.
 ```bash
 pnpm install
 pnpm typecheck          # tsc --build across all projects
-pnpm test               # vitest, 332 tests
+pnpm test               # vitest, 333 tests
 pnpm build              # web build for Pages
 pnpm --filter @slownav/web build:native   # payload for the APK
 pnpm --filter @slownav/web dev            # local dev server
@@ -557,12 +576,14 @@ done by hand once — the settings API needs repo-admin rights the default
   `shared/barometer.ts`), and so is background location
   (`TrackingService`, read through `shared/geolocation.ts`), which is what
   that seam was built for.
-- **Background recording has not been walked with yet.** It is verified
-  against a stubbed bridge in a browser — the service starts and stops with
-  the setting, survives the page being hidden, and every fix from the hidden
-  stretch lands in the trail in order — but no fixture proves what Android
-  does to a real foreground service in a pocket for six hours. Worth one
-  short walk with the screen off before relying on it for a day.
+- **Background recording still wants a walk.** The first one found the
+  network provider putting kilometre-wide fixes in the queue, which is
+  fixed. The rest is verified against a stubbed bridge in a browser — the
+  service starts and stops with the setting, survives the page being hidden,
+  and every fix from the hidden stretch lands in the trail in order — but no
+  fixture proves what Android does to a real foreground service in a pocket
+  for six hours, nor what the fixes look like once they are all from the
+  satellites.
 - iOS gets neither the barometer nor "open with": both need document types
   and UTIs declaring in the Xcode project. Nothing breaks the iOS build.
 - The forecast is Android- and browser-wide, but the barometer half of the
