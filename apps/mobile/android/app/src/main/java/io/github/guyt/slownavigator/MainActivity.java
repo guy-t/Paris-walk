@@ -2,12 +2,14 @@ package io.github.guyt.slownavigator;
 
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.provider.OpenableColumns;
 import android.util.Log;
@@ -66,12 +68,20 @@ public class MainActivity extends BridgeActivity {
     /** The barometer, on the phones that have one. */
     private final Barometer barometer = new Barometer();
 
+    /** The step counter, on the phones that have one and the walkers who allow it. */
+    private final Steps steps = new Steps();
+
+    /** Request code for the activity-recognition permission the step counter needs. */
+    private static final int STEPS_PERMISSION = 8801;
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getBridge().getWebView().addJavascriptInterface(new OpenedFiles(), "SlowNavFiles");
         getBridge().getWebView().addJavascriptInterface(barometer, "SlowNavBarometer");
         getBridge().getWebView().addJavascriptInterface(new Tracking(), "SlowNavTracking");
+        getBridge().getWebView().addJavascriptInterface(steps, "SlowNavSteps");
+        getBridge().getWebView().addJavascriptInterface(new StepPermission(), "SlowNavStepPermission");
         // Whatever launched us, if anything. The web layer collects it once
         // it has loaded; there is nothing to notify yet.
         readFrom(getIntent());
@@ -86,13 +96,43 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onResume() {
         super.onResume();
-        barometer.start((SensorManager) getSystemService(Context.SENSOR_SERVICE));
+        SensorManager sensors = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+        barometer.start(sensors);
+        steps.start(sensors, stepsAllowed());
     }
 
     @Override
     public void onPause() {
         barometer.stop();
+        // The step counter is *not* stopped: the register it reads counts in
+        // hardware whether anyone is listening, and leaving the listener on
+        // costs a few tens of microamps against the GNSS chip's hundreds of
+        // milliwatts. What it buys is a count that spans the pocket, which is
+        // the whole reason for reading it.
         super.onPause();
+    }
+
+    /** Whether this build may read the step counter at all. */
+    private boolean stepsAllowed() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return true;
+        return checkSelfPermission(android.Manifest.permission.ACTIVITY_RECOGNITION)
+                == PackageManager.PERMISSION_GRANTED;
+    }
+
+    @Override
+    public void onRequestPermissionsResult(
+            int requestCode, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(requestCode, permissions, results);
+        if (requestCode != STEPS_PERMISSION) return;
+        // Granted or not, the web layer asked and is waiting to hear. It reads
+        // `available()` again on the event rather than being handed an answer,
+        // so there is one place the answer comes from.
+        steps.start((SensorManager) getSystemService(Context.SENSOR_SERVICE), stepsAllowed());
+        final WebView web = getBridge() == null ? null : getBridge().getWebView();
+        if (web != null) {
+            web.post(() -> web.evaluateJavascript(
+                    "window.dispatchEvent(new Event('slownav:steps'))", null));
+        }
     }
 
     @Override
@@ -269,6 +309,117 @@ public class MainActivity extends BridgeActivity {
             } catch (JSONException e) {
                 return null;
             }
+        }
+    }
+
+    /**
+     * The step counter, as the web layer sees it.
+     *
+     * TYPE_STEP_COUNTER is a hardware register: it counts since the phone last
+     * rebooted, at almost no power, and it goes on counting whether or not
+     * anything is listening. That last part is why it is worth having here —
+     * it is the one measurement of the walk that survives a valley with no
+     * sky, and the only thing still arriving when the route position has to be
+     * held. TYPE_STEP_DETECTOR would need us awake for every step.
+     *
+     * It is not a position and must never be turned into one. The web layer
+     * uses it for a distance walked and a cadence, offered beside the age of
+     * the route position for the walker to act on.
+     *
+     * From Android 10 it needs ACTIVITY_RECOGNITION, which is a runtime
+     * permission and therefore a question. Nobody is asked until they turn the
+     * setting on, and `available()` is false until they have.
+     */
+    public static class Steps implements SensorEventListener {
+        private SensorManager sensors;
+        private Sensor sensor;
+        private boolean allowed;
+        private volatile long count = -1L;
+        private volatile long at = 0L;
+
+        void start(SensorManager manager, boolean permitted) {
+            allowed = permitted;
+            if (manager == null) return;
+            sensors = manager;
+            if (sensor == null) sensor = manager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER);
+            if (sensor == null || !permitted) return;
+            // The slowest rate on offer. The register is cumulative, so a
+            // reading every few seconds loses nothing but the wake-ups.
+            manager.registerListener(this, sensor, SensorManager.SENSOR_DELAY_NORMAL);
+        }
+
+        void stop() {
+            if (sensors != null && sensor != null) sensors.unregisterListener(this);
+        }
+
+        @Override
+        public void onSensorChanged(SensorEvent event) {
+            if (event.values.length == 0) return;
+            count = (long) event.values[0];
+            at = System.currentTimeMillis();
+        }
+
+        @Override
+        public void onAccuracyChanged(Sensor s, int accuracy) {
+            /* nothing to do: a counter does not need calibrating */
+        }
+
+        /** Whether this phone has the sensor at all, permission aside. */
+        @JavascriptInterface
+        public boolean present() {
+            return sensor != null;
+        }
+
+        /** Whether it can actually be read: the sensor exists and is permitted. */
+        @JavascriptInterface
+        public boolean available() {
+            return sensor != null && allowed;
+        }
+
+        /**
+         * The latest count as JSON, or null before one has arrived.
+         *
+         * The first event can be a step away: the register only reports when
+         * it changes, so a walker standing still has nothing to read yet.
+         */
+        @JavascriptInterface
+        public String read() {
+            long value = count;
+            long when = at;
+            if (value < 0 || when == 0L) return null;
+            try {
+                JSONObject out = new JSONObject();
+                out.put("steps", value);
+                out.put("at", when);
+                return out.toString();
+            } catch (JSONException e) {
+                return null;
+            }
+        }
+    }
+
+    /**
+     * Asking for the step counter, which is a question and so is asked once,
+     * when the walker turns the setting on.
+     */
+    public class StepPermission {
+        /** True when there is nothing left to ask — granted, or not needed. */
+        @JavascriptInterface
+        public boolean granted() {
+            return stepsAllowed();
+        }
+
+        /**
+         * Put the question. The answer arrives as a `slownav:steps` event,
+         * after which `SlowNavSteps.available()` tells the truth.
+         */
+        @JavascriptInterface
+        public void request() {
+            if (stepsAllowed()) return;
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return;
+            runOnUiThread(() -> requestPermissions(
+                    new String[] { android.Manifest.permission.ACTIVITY_RECOGNITION },
+                    STEPS_PERMISSION));
         }
     }
 

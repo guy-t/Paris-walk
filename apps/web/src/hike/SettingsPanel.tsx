@@ -8,6 +8,7 @@ import { providersFor, store, type AnyPoint } from "@slownav/core";
 import { useMemo, useState } from "react";
 import { DEFAULT_SETTINGS, type HikeSettings } from "./model.js";
 import { backgroundTrackingAvailable } from "../shared/geolocation.js";
+import { requestStepCounter, stepCounterPresent } from "../shared/steps.js";
 
 export interface SettingsPanelProps {
   settings: HikeSettings;
@@ -166,9 +167,50 @@ export function SettingsPanel({ settings, onSave, onClose, near }: SettingsPanel
         </label>
 
         <label>
+          Buzz at each instruction
+          <input
+            type="checkbox"
+            checked={draft.cueVib}
+            onChange={(e) => set("cueVib", e.target.checked)}
+          />
+        </label>
+        <p className="hint">
+          One short buzz as each route note becomes the current one, two for a warning — so
+          you can walk with the phone in a pocket and look only when there is something to
+          read. Nothing happens on a hike with no notes imported.
+        </p>
+
+        <label>
           Warn when the ETA is after sunset
           <input type="checkbox" checked={draft.sun} onChange={(e) => set("sun", e.target.checked)} />
         </label>
+
+        {/* Only where the sensor is. Asking to count steps on a phone that
+            cannot is the same lie as offering background recording in a
+            browser. Turning it on is what puts the permission question, so
+            nobody is asked who did not invite it. */}
+        {stepCounterPresent() && (
+          <>
+            <label>
+              Count my steps
+              <input
+                type="checkbox"
+                checked={draft.steps}
+                onChange={(e) => {
+                  set("steps", e.target.checked);
+                  if (e.target.checked) requestStepCounter();
+                }}
+              />
+            </label>
+            <p className="hint">
+              Steps and cadence on the dashboard, and — the reason it is here — when the
+              signal is too weak to place you, roughly how far you have walked since it went.
+              That is a distance, never a position: the app will not move you along the route
+              on it, but you can swipe the instruction on if it looks right. Android asks
+              permission the first time.
+            </p>
+          </>
+        )}
       </div>
 
       <div className="panel-foot">

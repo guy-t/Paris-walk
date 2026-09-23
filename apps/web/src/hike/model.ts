@@ -54,6 +54,25 @@ export interface HikeSettings {
    * complete trail can have it; nobody gets it without asking.
    */
   bgGps: boolean;
+  /**
+   * Buzz once as each instruction becomes the current one.
+   *
+   * On by default, and it is the cheapest thing in this file: no permission,
+   * no sensor, no battery worth measuring, and it means not looking at the
+   * phone until there is something to read. A junction is exactly where a
+   * walker's attention is on the path and not on a screen.
+   */
+  cueVib: boolean;
+  /**
+   * Read the phone's step counter, where it has one.
+   *
+   * Off by default because from Android 10 it is a runtime permission, and
+   * nobody should be asked a question they did not invite. What it buys is the
+   * one measurement of the walk that survives a valley with no sky: while the
+   * route position is held, the steps still say roughly how far the walker has
+   * come. It is never allowed to *be* the position.
+   */
+  steps: boolean;
 }
 
 /**
@@ -86,6 +105,8 @@ export const DEFAULT_SETTINGS: HikeSettings = {
   showSights: true,
   gpsOnOpen: true,
   bgGps: false,
+  cueVib: true,
+  steps: false,
 };
 
 /** The flat pace this app shipped with before it was measured. */

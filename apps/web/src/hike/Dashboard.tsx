@@ -33,6 +33,15 @@ export interface DashboardProps {
    * the walker to wonder why two screens differ.
    */
   altitude?: { metres: number; source: string } | null;
+  /**
+   * The step counter's answer, where the walker has turned it on.
+   *
+   * Two tiles rather than one, because they say different things: the total
+   * is the day's, and the cadence is the only reading on this screen that
+   * still moves while the fixes are too vague to place — a walker can tell
+   * from it that the app knows they are walking even when it cannot say where.
+   */
+  steps?: { walked: number | null; cadence: number | null } | null;
   /** Ticks every few seconds so elapsed and average times stay live. */
   tick: number;
 }
@@ -46,6 +55,7 @@ export function Dashboard({
   onCompact,
   onScrub,
   altitude: betterAltitude,
+  steps,
   tick,
 }: DashboardProps) {
   const { track, session, progress, mode } = state;
@@ -110,6 +120,12 @@ export function Dashboard({
     ["Descended", fmt.alt(interp(track.downCum, idx, t))],
     ["Descent left", fmt.alt(track.down - interp(track.downCum, idx, t))],
     ["Sunset", sun ? fmt.clock(sun.sunset) : "—"],
+    ...(steps
+      ? ([
+          ["Steps", steps.walked == null ? "—" : steps.walked.toLocaleString()],
+          ["Cadence", steps.cadence == null ? "—" : `${Math.round(steps.cadence)} /min`],
+        ] as [string, string, string?][])
+      : []),
     ["Total", `${fmt.km(track.length)} · ↑${fmt.alt(track.up)}`],
     ["Plan (Tobler)", fmt.dur(track.tobler)],
   ];
