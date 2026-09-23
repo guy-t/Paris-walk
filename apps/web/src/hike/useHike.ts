@@ -144,7 +144,24 @@ export function useHike(settings: HikeSettings) {
       // the line just left: right at the branch, where the two share their
       // first kilometres, and increasingly wrong anywhere else.
       const swapped = leaving != null && leaving.id !== id && dayId(leaving) === dayId(hike);
-      if (session && !swapped) tracker.current.anchor(progress);
+      // Everything else starts where the hike says: what the session reached,
+      // or the start of the line for a hike being opened fresh.
+      //
+      // That second half is not a nicety. Left unanchored, the first fix
+      // searched the whole line with no preference, and a day-3 circuit
+      // begins and ends 64 m apart — so a first fix 30–60 m out, which is
+      // ordinary before the GNSS has settled, could land on the *finish*.
+      // Reported from the hill: day 3 loaded and snapped to the end. It then
+      // stayed there, because the return leg runs alongside the outward one,
+      // so the windowed match kept succeeding and the jump path was never
+      // asked. Measured on day 3 from the trailhead with 100 m fixes, it
+      // happened 21 times in 200; anchored at 0 it happens once in 400, and
+      // recovers within the first kilometre.
+      //
+      // A walker who really does open the app half way along loses nothing:
+      // the jump path finds them in three fixes, measured at 15 seconds from
+      // 4 km and from 9 km along.
+      if (!swapped) tracker.current.anchor(progress);
 
       setState({
         ...INITIAL,
@@ -214,8 +231,17 @@ export function useHike(settings: HikeSettings) {
         speed: next.speed,
       });
 
+      // A fix whose own accuracy explains the distance is not evidence of a
+      // detour. The tracker still treats it as off-route — that is how a bad
+      // match gets escalated to a search of the whole line, and widening the
+      // threshold instead measurably worsened the position — but the walker
+      // is not told, because a banner and a buzz on a third of the fixes
+      // through a weak stretch teach them to ignore both.
+      const strayed =
+        next.offRoute && next.offDistance > Math.max(settingsRef.current.off, next.accuracy);
+
       if (
-        next.offRoute &&
+        strayed &&
         settingsRef.current.vib &&
         navigator.vibrate &&
         fix.timestamp - lastVibrated.current > VIBRATE_EVERY_MS
@@ -232,7 +258,7 @@ export function useHike(settings: HikeSettings) {
         speed: next.speed,
         heading: next.heading,
         progress: next.progress,
-        offTrack: next.offRoute,
+        offTrack: strayed,
         offDistance: next.offDistance,
         offBearing: next.offBearing,
         weak: false,

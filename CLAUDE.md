@@ -22,7 +22,7 @@ packages/core     geometry, map-matching, the GPS tracker, sessions, GPX,
                   sun times, Overpass and Wikipedia clients, offline tiles,
                   the forecast client, the barometric maths and the route-notes parser.
                   No React, no Leaflet, no DOM beyond the browser APIs that
-                  are the point. 270 unit tests.
+                  are the point. 271 unit tests.
 packages/ui       MapView, ElevationProfile, Sheet, StatTile, Toast, and the
                   geolocation / wake-lock / service-worker hooks.
 apps/web          one Vite app, one HTML entry per guide, two build targets.
@@ -453,12 +453,25 @@ Three changes, all measured on those tracks:
 - **The hike confirms now too**: 2/3/3, as the walk config always has. The
   comment in `tracker.ts` said it should be tried on a real walk before being
   adopted; it has been.
-- **`offThreshold` scales with the fix**: `max(50, accuracy × 0.8)`. Judged
-  against a flat 50 m, an honest 90 m fix is "off route" every time, and the
-  banner cried wolf for a third of a weak stretch.
-
 Measured after: day 3's 14.6 km error becomes 93 m, the 642 m becomes 426 m,
 the median error through a weak stretch halves, and the 120 lurches become 3.
+
+That change also made `offThreshold` scale with the fix's accuracy, and both
+halves of that were wrong. It never reached the phone at all — `openHike`
+passes `offThreshold: settings.off`, a plain number, so the app has always
+used a flat threshold whatever `HIKE_TRACKING` says. And it should: measured
+on the day-1 line through 3 km of 90 m fixes, widening it cut the false
+off-route flags from 889 of 2565 to 222 and made the worst position error
+*worse*, 324 m to 426 m. **The threshold is not only a display decision.** It
+is how a bad match gets escalated — a fix rejected by it raises `offCount`,
+which consults the whole line and can resync — so widening it leaves the
+wrong match looking on-route and nothing ever asks the better question.
+
+Crying wolf is the cheaper fault and is fixed where it belongs: `useHike`
+raises the banner and the buzz only for a distance the fix's own accuracy does
+not already explain (`offDistance > max(settings.off, accuracy)`), while the
+tracker goes on treating it as off-route internally. Display and matching are
+different questions and were being answered with one number.
 
 **Holding a position is not knowing it, and the tracker has to admit which.**
 A fix vaguer than `weakAccuracy` is held — `progress` does not move — which
@@ -472,6 +485,32 @@ is the worst kind of wrong, because it looks right. `TrackerState.heldFor`
 carries the age of the route position, and past two minutes the cue's second
 line says `position 8 min old` in amber instead of a distance, with the
 dashboard's status line saying the same.
+
+**A circuit's first fix is a coin toss, so somebody has to say which end.**
+Reported from the hill: day 3 loaded and snapped to the finish — `Done
+14.7 km, To go 0.0 km, Climb left 0 m, ETA 0 min`, on the first fix, before a
+step was walked. Reproduced on the built app.
+
+`openHike` anchored the tracker only when there was a session to resume, so a
+hike opened fresh started `lost`, and the first fix searched the whole line
+with no preference at all — `global: true` drops the progress penalties by
+design. Day 3's circuit begins and ends 64 m apart (day 4's, 57 m), so a
+first fix 30–60 m out, which is ordinary before the GNSS has settled, scores
+better against the *end* of the line. Then it tended to stay: the return leg
+runs alongside the outward one, so the windowed match kept succeeding and the
+jump path was never asked. Measured from the trailhead with 100 m fixes it
+happened 21 times in 200.
+
+The honest prior is that a walker opening a hike has not walked it, so every
+fresh open now anchors at 0 — the window is ±1500 m and the finish is simply
+out of reach. Measured: once in 400 with 100 m fixes, and that one recovers
+inside the first kilometre. A walker who really does open the app part-way
+along loses nothing, because the jump path finds them in three fixes: 15
+seconds, measured from 4 km and from 9 km along day 3.
+
+A *swap* between a day's two lines is still deliberately left unanchored, for
+the reason given above — there the carried-over distance is measured along the
+line just left.
 
 **Steps are a distance, never a position.** The step counter is the one
 instrument in the phone that goes on measuring the walk when the satellites
@@ -638,7 +677,7 @@ Pages CDN caches 404s, so a path a deploy just added keeps answering 404.
 ```bash
 pnpm install
 pnpm typecheck          # tsc --build across all projects
-pnpm test               # vitest, 357 tests
+pnpm test               # vitest, 358 tests
 pnpm build              # web build for Pages
 pnpm --filter @slownav/web build:native   # payload for the APK
 pnpm --filter @slownav/web dev            # local dev server

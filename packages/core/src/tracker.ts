@@ -109,10 +109,23 @@ export interface TrackerConfig {
  */
 export const HIKE_TRACKING: Omit<TrackerConfig, "match"> = {
   weakAccuracy: 120,
-  // A mountain fix under a cliff routinely says 60–110 m, which is honest and
-  // still usable — but judged against a flat 50 m it is "off route" every
-  // time, and the banner cried wolf for a third of a weak stretch.
-  offThreshold: (acc) => Math.max(50, acc * 0.8),
+  /**
+   * Deliberately flat, and tight.
+   *
+   * It looked obviously right to widen this with the fix's own accuracy, the
+   * way the walk config does — an honest 90 m fix judged against 50 m is "off
+   * route" every time. Measured on the day-1 line through 3 km of 90 m fixes
+   * it cut the false off-route flags from 889 of 2565 to 222, and made the
+   * worst position error *worse*: 324 m to 426 m.
+   *
+   * Because the threshold is not only a display decision. It is how a bad
+   * match gets escalated: a fix rejected here raises `offCount`, which
+   * consults the whole line and resyncs. Widen it and the wrong match looks
+   * on-route, so nothing ever asks the better question. Crying wolf is the
+   * cheaper fault, and it is fixed where it belongs — the app does not raise
+   * the banner for a distance the fix's own accuracy already explains.
+   */
+  offThreshold: 50,
   confirmOn: 2,
   confirmOff: 3,
   confirmJump: 3,

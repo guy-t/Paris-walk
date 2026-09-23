@@ -376,6 +376,32 @@ describe("RouteTracker", () => {
   });
 
   describe("anchor and reset", () => {
+    /**
+     * A circuit begins and ends in the same place, so the first fix of the
+     * day is a coin toss unless somebody says which end. Reported from the
+     * hill: day 3 loaded and snapped to the finish — its line starts and ends
+     * 64 m apart, and a first fix 30–60 m out is ordinary before the GNSS has
+     * settled. It then stayed there, because the return leg runs alongside
+     * the outward one, so the windowed match kept succeeding and the jump
+     * path was never asked.
+     *
+     * Anchoring at zero is the honest prior: a walker opening a hike has not
+     * walked it yet. `openHike` does that for every fresh open now.
+     */
+    it("anchored at the start, a fix by a loop's end stays at its beginning", () => {
+      const loop = outAndBack(); // out 1 km east, back 5 m to the north
+      const loopCum = cumulative(loop);
+      const t = hikeTracker(loop, loopCum, HIKE_MATCH);
+      t.anchor(0);
+      // Standing at the trailhead, but the fix lands nearer the return leg,
+      // which is where the walk ends 2 km along.
+      const s = t.update(fixAt(0, 6));
+      expect(s.progress).toBeLessThan(200);
+      // …and stays there as the walk sets off.
+      t.update(fixAt(60));
+      expect(t.update(fixAt(120)).progress).toBeLessThan(300);
+    });
+
     it("anchor places the walker without waiting for confirmation", () => {
       const t = walkTracker(line, cum, WALK_MATCH);
       t.anchor(1200);
@@ -404,15 +430,26 @@ describe("RouteTracker", () => {
       expect(t.update(fixAt(340, 200)).offRoute).toBe(true);
     });
 
-    it("allows a vague fix to be further from the line before crying wolf", () => {
-      // 110 m of accuracy is ordinary under a cliff, and judged against a
-      // flat 50 m it is "off route" every time.
+    /**
+     * The threshold stays flat and tight, and that is a measured choice.
+     *
+     * Widening it with the fix's own accuracy looks obviously right — 110 m
+     * of accuracy is ordinary under a cliff, and against a flat 50 m it reads
+     * as a detour every time. But the threshold is also how a bad match gets
+     * escalated: a rejected fix raises `offCount`, which consults the whole
+     * line. Measured on the day-1 line through 3 km of 90 m fixes, widening
+     * it cut the false off-route flags from 889 in 2565 to 222 and made the
+     * worst position error worse, 324 m to 426 m. So the matching stays
+     * strict and the *app* declines to raise a banner for a distance the
+     * fix's own accuracy explains.
+     */
+    it("judges a vague fix against the same tight threshold", () => {
       const t = hikeTracker(line, cum, HIKE_MATCH);
       t.update(fixAt(0));
       for (const m of [100, 200, 300, 400]) {
         t.update(fixAt(m, 70, { accuracy: 110 }));
       }
-      expect(t.offRoute).toBe(false);
+      expect(t.offRoute).toBe(true);
     });
 
     it("does not move progress for a match beyond maxSnap", () => {
