@@ -367,6 +367,9 @@ body.map-full .dash { position: absolute; top: max(8px, env(safe-area-inset-top)
 .cue .cue-text { flex: 1; min-width: 0; line-height: 1.35; }
 .cue .cue-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 3px; min-height: 18px; }
 .cue .cue-dist { font-variant-numeric: tabular-nums; color: var(--muted-strong); font-size: 12px; white-space: nowrap; }
+/* A held position is not a position. Say it in the colour that means
+   "do not act on this number" rather than leaving it looking current. */
+.cue .cue-dist.stale { color: var(--amber); font-weight: 600; }
 .cue.warn { background: #fef2f2; color: var(--warn); font-weight: 600; }
 .cue.held { background: #fffbeb; box-shadow: inset 0 0 0 1px var(--amber); }
 /* The one control left, and only while a step is being held by hand. */

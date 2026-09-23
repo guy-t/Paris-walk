@@ -22,7 +22,7 @@ packages/core     geometry, map-matching, the GPS tracker, sessions, GPX,
                   sun times, Overpass and Wikipedia clients, offline tiles,
                   the forecast client, the barometric maths and the route-notes parser.
                   No React, no Leaflet, no DOM beyond the browser APIs that
-                  are the point. 314 unit tests.
+                  are the point. 260 unit tests.
 packages/ui       MapView, ElevationProfile, Sheet, StatTile, Toast, and the
                   geolocation / wake-lock / service-worker hooks.
 apps/web          one Vite app, one HTML entry per guide, two build targets.
@@ -422,6 +422,55 @@ Measured at 360×740: 167px of clipped list before, 274px of reachable list
 after, nothing hanging off the bottom. Any new fixed height in that column
 has to be checked the same way — the clipping is silent.
 
+**A walker cannot move 200 m in five seconds, and the tracker used to let
+them.** Reported from the hill as the position jumping around, and the route
+notes going out of step with the walk after a stretch of weak signal. Both are
+the same mechanism. `HIKE_MATCH` gives a forward jump of up to `aheadFree`
+(200 m) for nothing, and `HIKE_TRACKING` had `confirm*: 1`, so a single fix
+could move the route position 200 m — which is two minutes of walking, and
+often a whole instruction — and the next one move it back.
+
+Simulated along the four real day tracks, a walker at 4.2 km/h with ordinary
+12 m fixes: on the day-3 circuit, whose start and end are the same place, the
+route position latched onto the *end* of the line within the first 200 m and
+read 14.6 km done of 14.7 km, for a third of a kilometre of walking. Over a
+day of 90 m fixes — which is what a phone under a cliff honestly reports, and
+is *under* the 120 m `weakAccuracy` gate, so every one of them was matched —
+the route position was up to 642 m from the walker and moved by more than
+150 m between two consecutive fixes 120 times.
+
+Three changes, all measured on those tracks:
+
+- **Pace is a limit, not a penalty.** What the match may move the route
+  position by is `maxAdvance` (2.5 m/s) × the time since it last moved, plus
+  `advanceSlack`. Five seconds of that is 72 m; the twenty minutes a pocket
+  took is 3 km — so one rule covers a noisy fix and a drained queue, and the
+  match's `aheadFree` and `windowAhead` are set from it per fix rather than
+  fixed. A walker who really has gone further is the jump path's business,
+  and that wants `confirmJump` fixes agreeing first.
+- **The hike confirms now too**: 2/3/3, as the walk config always has. The
+  comment in `tracker.ts` said it should be tried on a real walk before being
+  adopted; it has been.
+- **`offThreshold` scales with the fix**: `max(50, accuracy × 0.8)`. Judged
+  against a flat 50 m, an honest 90 m fix is "off route" every time, and the
+  banner cried wolf for a third of a weak stretch.
+
+Measured after: day 3's 14.6 km error becomes 93 m, the 642 m becomes 426 m,
+the median error through a weak stretch halves, and the 120 lurches become 3.
+
+**Holding a position is not knowing it, and the tracker has to admit which.**
+A fix vaguer than `weakAccuracy` is held — `progress` does not move — which
+is right for a fix or two and a lie after ten minutes. It was a lie in two
+ways. `lost` stayed false, so the next usable fix searched a window around
+where the walker was before the cliff rather than the whole line; `holdLimit`
+(600 s) now gives up, and the window meanwhile grows with the gap, so nothing
+depends on the walker having stayed put. And the screen said nothing: the cue
+went on showing "in 300 m" measured from a position half an hour old, which
+is the worst kind of wrong, because it looks right. `TrackerState.heldFor`
+carries the age of the route position, and past two minutes the cue's second
+line says `position 8 min old` in amber instead of a distance, with the
+dashboard's status line saying the same.
+
 **A cue read off the distance walked needs a manual override.** `stepAt`
 picks the last instruction at or behind the walker, which is right until the
 walk and the notes part company: a missed turn, a stretch covered with the
@@ -543,7 +592,7 @@ Pages CDN caches 404s, so a path a deploy just added keeps answering 404.
 ```bash
 pnpm install
 pnpm typecheck          # tsc --build across all projects
-pnpm test               # vitest, 341 tests
+pnpm test               # vitest, 347 tests
 pnpm build              # web build for Pages
 pnpm --filter @slownav/web build:native   # payload for the APK
 pnpm --filter @slownav/web dev            # local dev server

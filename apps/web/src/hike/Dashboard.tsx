@@ -86,7 +86,10 @@ export function Dashboard({
       : !state.pos
         ? "Waiting for GPS…"
         : state.weak
-          ? `Weak GPS (±${Math.round(state.accuracy ?? 0)} m)`
+          ? `Weak GPS (±${Math.round(state.accuracy ?? 0)} m)` +
+            // How long it has been weak, because that is what decides whether
+            // the rest of the screen is still worth reading.
+            (state.heldFor > 120 ? ` · position ${fmt.dur(state.heldFor)} old` : "")
           : `Tracking · ±${Math.round(state.accuracy ?? 0)} m · ${fmt.speed(state.speed)}`;
 
   // The strip's derived numbers. Recomputed on `tick` so elapsed time moves
