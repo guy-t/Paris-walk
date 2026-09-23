@@ -43,14 +43,23 @@ describe("parseFixes", () => {
   it("does not turn a missing altitude into sea level", () => {
     expect(parseFixes(fix({ altitude: null }))[0]!.altitude).toBeNull();
     expect(parseFixes(fix({ speed: null }))[0]!.speed).toBeNull();
-    expect(parseFixes(fix({ accuracy: null }))[0]!.accuracy).toBe(50);
+  });
+
+  it("does not call an unstated accuracy good", () => {
+    // 50 m would read as a usable fix and move the walker along the route.
+    // Anything past the tracker's weak threshold (120 m for the hike) is
+    // shown but not acted on, which is what an unknown deserves.
+    for (const over of [{ accuracy: null }, { accuracy: "about 10m" }, {}]) {
+      const f = parseFixes(JSON.stringify([{ lat: 43, lon: -4, ...over }]))[0]!;
+      expect(f.accuracy).toBeGreaterThan(200);
+    }
   });
 
   it("fills in what a fix may legitimately lack", () => {
     // A phone without a barometric altitude, or standing still, reports
-    // neither altitude nor bearing; that is not a broken fix.
+    // neither altitude nor bearing; that is not a broken fix. An accuracy
+    // is different — see below — and is never guessed at.
     const bare = parseFixes(JSON.stringify([{ lat: 43, lon: -4 }]))[0]!;
-    expect(bare.accuracy).toBe(50);
     expect(bare.altitude).toBeNull();
     expect(bare.speed).toBeNull();
     expect(bare.heading).toBeNull();
