@@ -267,6 +267,36 @@ climb is 1.08 hPa and the sensor resolves about 0.05, so *change* is good
 to well under a metre. Excellent at "am I still going up", fair at "how
 high am I", and the UI should never let those two be confused.
 
+**The ETA is walking time, and the comparison is moving against moving.**
+Tobler's hiking function over the remaining profile, scaled once there is a
+sample by how the walker is actually going. It used *wall-clock elapsed*
+against Tobler's *moving* prediction, which is two different quantities, and
+the error was large in both directions. The session starts when the hike is
+opened, so a phone opened over breakfast and carried out of the door an hour
+later hit the 20-minute gate with 80 minutes of elapsed against 20 of
+predicted — a factor of 4, clamped to 3, and an arrival three times Tobler
+for the rest of the day. And every break was extrapolated: 45 minutes of
+lunch after two hours of walking made the factor 1.4, applied to all the
+distance left, charging the walker for a second lunch and a third.
+
+So breaks are deliberately *not* in the number. It answers "how long am I
+still walking for" — which is what On Foot's own "4 hrs walking" means,
+against their "allow 5¼ hrs" — and the strip's Elapsed and Moving tiles show
+what the stops have cost. A raw running average of speed would be worse than
+either: 3 km/h up a 20% slope and 3 km/h on the flat say completely
+different things about what is left, which is the whole reason for scaling
+Tobler rather than averaging speed.
+
+**The flat-ground pace is 4.2 km/h, and it was measured.** At the 5 km/h
+this shipped with, the app's plan ran 7–15% ahead of the walking company's
+own times for the same four tracks — 3h35 against 4h00 on day 1, 2h08
+against 2h30 on day 4. Matching them takes 4.2–4.6. It only decides the
+first twenty minutes of a walk, after which the walker's own pace takes
+over. `loadSettings` moves a stored pace of exactly the old default to the
+new one, because stored settings win over `DEFAULT_SETTINGS` and the change
+would otherwise reach nobody who had ever opened the settings panel; a pace
+deliberately set to anything else is left alone.
+
 **Route notes never enter this repository.** They are the walking company's
 words — a personal copy of a copyrighted document, with the host's mobile
 number in it. They are imported from a file on the phone, kept in that
@@ -513,7 +543,7 @@ Pages CDN caches 404s, so a path a deploy just added keeps answering 404.
 ```bash
 pnpm install
 pnpm typecheck          # tsc --build across all projects
-pnpm test               # vitest, 333 tests
+pnpm test               # vitest, 341 tests
 pnpm build              # web build for Pages
 pnpm --filter @slownav/web build:native   # payload for the APK
 pnpm --filter @slownav/web dev            # local dev server

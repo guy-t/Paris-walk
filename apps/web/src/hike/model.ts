@@ -68,7 +68,16 @@ export const PREFERRED_PROVIDERS = ["ign-es", "opentopo"] as const;
 
 export const DEFAULT_SETTINGS: HikeSettings = {
   units: "metric",
-  pace: 5,
+  /**
+   * Flat-ground pace the Tobler estimate is scaled to.
+   *
+   * 4.2 km/h, not the 5 this started at. Measured against the four Picos
+   * days, 5 put the app 7–15% ahead of the walking company's own times for
+   * the same tracks; matching them takes 4.2–4.6, and 4.2 is the end that
+   * fits the two days it was furthest out on. It only decides the first
+   * twenty minutes of a walk — after that the walker's own pace takes over.
+   */
+  pace: 4.2,
   off: 50,
   vib: true,
   sun: true,
@@ -79,8 +88,17 @@ export const DEFAULT_SETTINGS: HikeSettings = {
   bgGps: false,
 };
 
+/** The flat pace this app shipped with before it was measured. */
+const OLD_DEFAULT_PACE = 5;
+
 export function loadSettings(): HikeSettings {
-  return { ...DEFAULT_SETTINGS, ...(store.get<Partial<HikeSettings>>("hike:settings") ?? {}) };
+  const stored = store.get<Partial<HikeSettings>>("hike:settings") ?? {};
+  // A walker who never touched the pace is still carrying the old default,
+  // and stored settings win over `DEFAULT_SETTINGS` — so changing the
+  // default alone would reach nobody who has ever opened the settings panel.
+  // Only the exact old value moves; anything deliberately set is left alone.
+  if (stored.pace === OLD_DEFAULT_PACE) stored.pace = DEFAULT_SETTINGS.pace;
+  return { ...DEFAULT_SETTINGS, ...stored };
 }
 
 export function saveSettings(s: HikeSettings): void {
@@ -234,7 +252,7 @@ export interface Eta {
   seconds: number;
   at: Date;
   /** What the estimate is based on — shown so the number can be trusted or not. */
-  basis: "planned pace" | "your pace today";
+  basis: "planned pace" | "your walking pace";
   /** Tobler's own prediction for the remaining distance, unscaled. */
   toblerLeft: number;
 }
@@ -245,16 +263,30 @@ const CALIBRATE_AFTER_S = 20 * 60;
 const CALIBRATE_AFTER_M = 800;
 
 /**
- * Time to the end of the track.
+ * Time still to walk, and the clock time that reaches.
  *
- * Starts from Tobler's hiking function over the remaining profile, then — once
- * there is enough of a sample — scales it by how this walker is actually
- * doing today against what Tobler predicted for the ground already covered.
- * A heavy pack, deep snow or a hangover all show up here without anyone
- * having to tell the app about them.
+ * Tobler's hiking function over the remaining profile — speed as a function
+ * of gradient — scaled, once there is enough of a sample, by how this walker
+ * is actually going against what Tobler predicted for the ground they have
+ * covered. A heavy pack, deep snow or a hangover all show up here without
+ * anyone having to tell the app about them. The scaling is clamped to 0.5–3×:
+ * beyond that the sample is more likely to be wrong than the walker is to be
+ * that fast or that slow.
  *
- * The scaling is clamped to 0.5–3×: beyond that the sample is more likely to
- * be wrong than the walker is to be that fast or that slow.
+ * It is *walking* time, and the comparison is moving time against moving
+ * time. This used wall-clock elapsed against Tobler's moving prediction,
+ * which is two different quantities, and the error was large in both
+ * directions. The session starts when the hike is opened, so a phone opened
+ * over breakfast and carried out of the door an hour later hit the 20-minute
+ * gate with 80 minutes of "elapsed" against 20 of predicted — a factor of 4,
+ * clamped to 3, and an arrival three times Tobler for the rest of the day.
+ * And every break was extrapolated: 45 minutes of lunch after two hours of
+ * walking made the factor 1.4, which was then applied to all the distance
+ * left, charging the walker for a second lunch and a third.
+ *
+ * So breaks are deliberately not in this number. It answers "how long am I
+ * still walking for", which is what On Foot's own "4 hrs walking" means, and
+ * the strip's Elapsed and Moving tiles show what the stops have cost.
  */
 export function eta(
   track: ProcessedTrack,
@@ -273,10 +305,11 @@ export function eta(
     // What did Tobler predict for the stretch this session actually walked?
     const from = positionAt(track.pts, track.cum, Math.max(0, progress - session.dist));
     const predicted = toblerDone - interp(track.tobCum, from.idx, from.t);
-    const elapsed = (now - session.start) / 1000;
     if (predicted > 300) {
-      factor = Math.min(3, Math.max(0.5, elapsed / predicted));
-      basis = "your pace today";
+      // Moving time against moving time. `session.moving` only accrues while
+      // the walker is actually moving, which is the whole point of keeping it.
+      factor = Math.min(3, Math.max(0.5, session.moving / predicted));
+      basis = "your walking pace";
     }
   }
 
