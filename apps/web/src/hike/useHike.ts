@@ -60,6 +60,8 @@ export interface HikeState {
   offBearing: number | null;
   /** The last fix was too vague to place on the track. */
   weak: boolean;
+  /** Seconds since the route position last came from a fix. */
+  heldFor: number;
   session: Session | null;
   tiles: { have: number; total: number } | null;
 }
@@ -81,6 +83,7 @@ const INITIAL: HikeState = {
   offDistance: 0,
   offBearing: null,
   weak: false,
+  heldFor: 0,
   session: null,
   tiles: null,
 };
@@ -192,7 +195,13 @@ export function useHike(settings: HikeSettings) {
       const next = t.update(fix);
 
       if (next.weak) {
-        patch({ mode: "gps", pos: next.pos, accuracy: next.accuracy, weak: true });
+        patch({
+          mode: "gps",
+          pos: next.pos,
+          accuracy: next.accuracy,
+          weak: true,
+          heldFor: next.heldFor,
+        });
         return;
       }
 
@@ -227,6 +236,7 @@ export function useHike(settings: HikeSettings) {
         offDistance: next.offDistance,
         offBearing: next.offBearing,
         weak: false,
+        heldFor: next.heldFor,
         // A new object each time, so React sees the session changed.
         session: { ...session },
       });
@@ -254,6 +264,7 @@ export function useHike(settings: HikeSettings) {
       mode: "preview",
       offTrack: false,
       weak: false,
+      heldFor: 0,
       speed: null,
       pos: s.track ? positionAt(s.track.pts, s.track.cum, s.progress).pos : s.pos,
     }));

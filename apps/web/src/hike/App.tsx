@@ -431,6 +431,14 @@ export function App() {
   const [drag, setDrag] = useState(0);
   const swipe = useRef<{ x: number; y: number; at: number } | null>(null);
 
+  /**
+   * Long enough without a usable fix that the route position is history.
+   *
+   * Two minutes is twenty-odd fixes at the rate they normally arrive, and a
+   * walker covers 140 m in it — about the point where the distance to the
+   * next instruction stops being a number worth believing.
+   */
+  const stale = state.mode === "gps" && state.heldFor > 120;
   const cueIndex = heldStep ?? liveIndex;
   const cueStep = shown[cueIndex] ?? null;
   const cueNext = shown[cueIndex + 1] ?? null;
@@ -727,13 +735,21 @@ export function App() {
           <div className="cue-foot">
             {/* Where this instruction is relative to the walker, not just
                 where the next one is. A cue that has stopped advancing then
-                says so — "1.8 km back" — instead of looking current. */}
-            <span className="cue-dist">
-              {cueStep.prog == null
-                ? "not on this line"
-                : cueStep.prog >= state.progress
-                  ? `in ${fmt.dist(cueStep.prog - state.progress)}`
-                  : `${fmt.dist(state.progress - cueStep.prog)} back`}
+                says so — "1.8 km back" — instead of looking current.
+
+                And when the fixes have been too vague to place for a while,
+                that distance is measured from where the walker was before the
+                signal went, not from where they are. Saying so is the whole
+                difference between a cue that is stale and a cue that is
+                confidently wrong — which is what "stuck at [D]" felt like. */}
+            <span className={`cue-dist${stale ? " stale" : ""}`}>
+              {stale
+                ? `position ${fmt.dur(state.heldFor)} old`
+                : cueStep.prog == null
+                  ? "not on this line"
+                  : cueStep.prog >= state.progress
+                    ? `in ${fmt.dist(cueStep.prog - state.progress)}`
+                    : `${fmt.dist(state.progress - cueStep.prog)} back`}
             </span>
             {heldStep != null ? (
               <button className="cue-live" onClick={() => setHeldStep(null)}>
