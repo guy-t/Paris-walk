@@ -55,6 +55,17 @@ export interface RouteNotes {
 const STEP = /^(\d{1,2}):(\d{2})\s+([0-9][0-9.,]*\s*(?:km|m|M|KM|Km))\s+(.*)$/;
 /** A step whose distance is printed but whose time is not, and vice versa. */
 const STEP_DIST_ONLY = /^([0-9][0-9.,]*\s*(?:km|m|M|KM|Km))\s+(.*)$/;
+/**
+ * A step numbered by time alone — `2:39`, or `0:00hrs` for the first.
+ *
+ * Not every booklet prints a cumulative distance. The Picos days gave time
+ * and distance together; the Basque days give the time and put the minutes to
+ * the *next* step in a trailing bracket, with distances only inside the
+ * sentence ("continue for 1½km"). Without this the parser read no steps at
+ * all from a whole day, and the app said so honestly and left the walker with
+ * no instruction on the screen.
+ */
+const STEP_TIME_ONLY = /^(\d{1,2}):(\d{2})\s*(?:hrs?\b\.?)?\s+(.*)$/;
 const REF = /^\[([^\]]{1,40})\]\s*/;
 
 /**
@@ -112,11 +123,13 @@ export function parseNotes(text: string): RouteNotes {
     const body = line.trim();
 
     const step = STEP.exec(body);
-    const distOnly = step ? null : STEP_DIST_ONLY.exec(body);
-    if (step || distOnly) {
-      const time = step ? Number(step[1]) * 3600 + Number(step[2]) * 60 : null;
-      const noteM = parseDistance((step ? step[3] : distOnly![1])!);
-      let rest = (step ? step[4] : distOnly![2])!.trim();
+    const timeOnly = step ? null : STEP_TIME_ONLY.exec(body);
+    const distOnly = step || timeOnly ? null : STEP_DIST_ONLY.exec(body);
+    if (step || timeOnly || distOnly) {
+      const t = step ?? timeOnly;
+      const time = t ? Number(t[1]) * 3600 + Number(t[2]) * 60 : null;
+      const noteM = step ? parseDistance(step[3]!) : distOnly ? parseDistance(distOnly[1]!) : null;
+      let rest = (step ? step[4] : timeOnly ? timeOnly[3] : distOnly![2])!.trim();
       let ref: string | null = null;
       const r = REF.exec(rest);
       if (r) {
@@ -295,6 +308,60 @@ function endsAt(text: string, anchors: readonly NoteAnchor[]): NoteAnchor | null
  *     waypoints are unnamed. A later variant with no anchors is left
  *     unplaced rather than drawn onto a line it does not walk.
  */
+/**
+ * Distances for steps that gave only a time, read off the track's own profile.
+ *
+ * `placeSteps` works in metres from end to end — anchors, agreement,
+ * interpolation — so a booklet numbered by the clock has to be converted
+ * before it can be placed, not placed differently.
+ *
+ * The conversion is Tobler's, which is the point. Scaling the clock straight
+ * onto the line would put a step two hours in at two-fifths of a six-hour
+ * walk, and two hours of the Jaizkibel ridge is nothing like two hours of the
+ * coast path afterwards. The track's `tobCum` already says how long each
+ * stretch takes on its own gradient, so the booklet's total walking time is
+ * mapped onto Tobler's total and each step read off where the two agree. The
+ * walking company's estimate and Tobler's differ by a constant factor, and
+ * that factor divides out.
+ *
+ * It is a starting guess, not an answer: the bracketed waypoints still pin
+ * what they touch and `placeSteps` rescales between them, so the terrain only
+ * has to carry the stretches nothing else anchors.
+ */
+export function timesToDistances(
+  steps: readonly NoteStep[],
+  tobCum: readonly number[],
+  cum: readonly number[],
+): NoteStep[] {
+  // Only for a file that is genuinely time-only; a mixed one is left alone
+  // rather than half-converted.
+  if (!steps.length || steps.some((s) => s.noteM != null)) return [...steps];
+  const times = steps.map((s) => s.time).filter((t): t is number => t != null);
+  const last = Math.max(0, ...times);
+  const totalTob = tobCum[tobCum.length - 1] ?? 0;
+  if (!times.length || last <= 0 || totalTob <= 0 || cum.length !== tobCum.length) {
+    return [...steps];
+  }
+
+  const scale = totalTob / last;
+  const at = (seconds: number): number => {
+    const target = Math.max(0, Math.min(totalTob, seconds * scale));
+    let lo = 0;
+    let hi = tobCum.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (tobCum[mid]! < target) lo = mid + 1;
+      else hi = mid;
+    }
+    const i = Math.max(1, lo);
+    const span = tobCum[i]! - tobCum[i - 1]!;
+    const f = span > 0 ? (target - tobCum[i - 1]!) / span : 0;
+    return cum[i - 1]! + (cum[i]! - cum[i - 1]!) * f;
+  };
+
+  return steps.map((s) => (s.time == null ? s : { ...s, noteM: at(s.time) }));
+}
+
 export function placeSteps(
   steps: readonly NoteStep[],
   anchors: readonly NoteAnchor[],
@@ -374,6 +441,36 @@ export function placeSteps(
       const lastNote = Math.max(0, ...mine.map((s) => s.noteM ?? 0));
       if (lastNote > 0) {
         pairs.push({ noteM: 0, prog: 0 }, { noteM: lastNote, prog: trackLength });
+      }
+    } else if (variant === firstVariant) {
+      /**
+       * The ends, which are anchors nobody writes down.
+       *
+       * A day's notes begin where its line begins and finish where it
+       * finishes, and outside the outermost bracketed waypoint there is
+       * nothing else to say how far a printed hour is worth. With three
+       * anchors in the middle of a 20 km day, the last instruction
+       * extrapolated on that middle stretch's scale and landed at 16 km —
+       * four kilometres short of the hotel it names.
+       *
+       * Added on the same terms as any other extra candidate: only where
+       * they fit outside what has already been agreed, never displacing it.
+       * Measured against the real day-1 notes, whose first 675 m are
+       * extrapolated backwards from waypoint `1`: the residuals are identical
+       * either way — 17 m at worst, 2 m mean over nine anchored steps — and
+       * the only thing that moves is the first instruction, from 10 m along
+       * to the door it is written from.
+       */
+      const notes = mine.map((s) => s.noteM).filter((m): m is number => m != null);
+      const firstNote = Math.min(...notes);
+      const lastNote = Math.max(...notes);
+      const lo = pairs[0]!;
+      const hi = pairs[pairs.length - 1]!;
+      if (notes.length && firstNote < lo.noteM && lo.prog > 0) {
+        pairs.unshift({ noteM: firstNote, prog: 0 });
+      }
+      if (notes.length && lastNote > hi.noteM && hi.prog < trackLength) {
+        pairs.push({ noteM: lastNote, prog: trackLength });
       }
     }
 

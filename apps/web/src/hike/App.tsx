@@ -612,6 +612,35 @@ export function App() {
 
   // The pace the ETA has settled on, so the forecast and the arrival time on
   // the dashboard never disagree about when the walker reaches the col.
+  /** The day's lines: the one open, and any option that forks from it. */
+  const family = useMemo(
+    () => (state.hike ? library.family(state.hike.id).map((h) => ({ id: h.id, name: h.name })) : []),
+    [state.hike],
+  );
+
+  /**
+   * Swap to another line of the same day.
+   *
+   * `openHike` already knows this is a relocation rather than a resume — same
+   * day, different line — so it carries the session over, flushes what had
+   * accrued, and leaves the tracker unanchored for the first fix to place.
+   * Nothing here needs to know any of that; it only has to name the line.
+   */
+  const chooseLine = useCallback(
+    (id: string) => {
+      if (!state.hike || id === state.hike.id) return;
+      const opened = hike.openHike(id);
+      if (!opened) return;
+      setHeldStep(null);
+      setFitNonce((n) => n + 1);
+      show(`Now on ${opened.hike.name}.`);
+      if (!store.get(`hike:sights:${id}`) && navigator.onLine) {
+        void hike.loadSights(opened.hike, opened.track);
+      }
+    },
+    [state.hike, hike, show],
+  );
+
   const paceFactor =
     hike.eta && hike.eta.toblerLeft > 0 ? hike.eta.seconds / hike.eta.toblerLeft : 1;
   const weather = useWeather(state.hike?.id ?? null, state.track, state.progress, paceFactor);
@@ -1021,6 +1050,9 @@ export function App() {
           fmt,
           variant,
           onVariant: chooseVariant,
+          lines: family,
+          currentLine: state.hike?.id ?? null,
+          onLine: chooseLine,
           onImport: () => notesInput.current?.click(),
           onForget: () => {
             if (!day) return;

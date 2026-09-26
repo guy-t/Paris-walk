@@ -625,6 +625,52 @@ in a second, and a cue moving backwards is the walk being re-matched, not a
 junction. Measured on the built app against day 1: 25 buzzes over 14.5 km,
 one of them the warning.
 
+**Not every booklet numbers its steps by distance.** The Picos days printed
+a cumulative time *and* a cumulative distance; the Basque days print the time
+only, with the minutes to the next step in a trailing bracket and distances
+buried inside the sentence. `parseNotes` required a distance, so it read
+**zero steps** from a whole day and the walker got no cue at all.
+
+`STEP_TIME_ONLY` reads them, and `timesToDistances` gives each one a distance
+before anything else happens — `placeSteps` works in metres from end to end,
+so a time-only booklet is converted, not placed differently. The conversion
+goes through the track's own `tobCum`, which is the point: scaling the clock
+straight onto the line puts an hour of the Jaizkibel ridge and an hour of the
+coast path afterwards at the same distance. Measured on the real day-2 line
+against the three timing points the booklet prints beside waypoints `[3]`,
+`[5]` and `[6]` — mean error **221 m** through the terrain against **1678 m**
+scaling the clock flat. And that is only the starting guess: the bracketed
+waypoints still pin what they touch, so the terrain carries the stretches
+nothing else anchors.
+
+**The ends of a day are anchors nobody writes down.** Outside the outermost
+bracketed waypoint there is nothing to say what a printed hour is worth, so
+the last instruction extrapolates on the scale of whatever stretch came
+before it: on a 20 km day anchored only in the middle, it landed at 16 km,
+four kilometres short of the hotel it names. The notes begin where the line
+begins and end where it ends, so those two are added as pairs — on the same
+terms as any other extra candidate, only where they fit outside what is
+already agreed, never displacing it. Measured against the real day-1 notes:
+identical residuals either way, 17 m worst and 2 m mean over nine anchored
+steps, with only the first instruction moving, from 10 m along to the door it
+is written from.
+
+**The route pills come from the library, not from the notes.** They used to
+be built from the `## ` headings in the imported file and matched to a line
+*by position*, which meant they appeared only once notes had been typed up,
+and only worked when the booklet listed exactly the variants the library
+holds, in the same order. Day 3's booklet lists six walking options against
+two lines. So the chooser is the day's `library.family` now, shown whenever
+there is more than one line, notes or no notes — the line is what the map
+draws, what the distance counts down and what the ETA is for, so it is worth
+changing on a day whose instructions have not been typed up. Measured on the
+built app: one tap switches, and the session survives it — 2440 m walked,
+2605 m of maxProg, 20 trail points and the same start, before and after.
+
+The notes' own variant pills are still there for a booklet that prints more
+variants than the library has lines, and hidden when the two agree so a day
+never shows two rows of pills saying the same thing.
+
 **A cue read off the distance walked needs a manual override.** `stepAt`
 picks the last instruction at or behind the walker, which is right until the
 walk and the notes part company: a missed turn, a stretch covered with the
@@ -800,13 +846,6 @@ done by hand once — the settings API needs repo-admin rights the default
   from the `option` / `onto` / `off` classification the build already derives,
   with a row of pills per choice rather than a row of line names. The hotel is
   a trip-level setting, not a line: chosen once, composed onto every day.
-- **Route notes with no cumulative distance.** The Basque booklet numbers its
-  steps by time alone — `2:39`, `3:04`, with the minutes to the next step in a
-  trailing bracket — and `parseNotes` requires a distance, so it reads **zero
-  steps** from them and the day gets no cue at all. It needs a time-only step
-  form, and `placeSteps` then has to interpolate on time rather than distance,
-  which means going through Tobler against the measured profile: an hour of
-  ascent is not the same distance as an hour on the flat.
 - Canal and walk ports.
 - **The first 675 m of day 1 are extrapolated**, backwards from waypoint
   `1`, because nothing in Potes anchors: `Casa Cayo` is named mid-sentence

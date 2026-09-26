@@ -11,6 +11,7 @@
 import {
   parseNotes,
   placeSteps,
+  timesToDistances,
   projectAll,
   store,
   type NoteAnchor,
@@ -124,5 +125,9 @@ export function placeNotes(
       anchors.push({ name: w.name, prog: hit.prog });
     }
   }
-  return placeSteps(notes.steps, anchors, track.length);
+  // A booklet that numbers its steps by time alone gets a distance first,
+  // read off the track's own gradient profile. Everything after this works in
+  // metres exactly as it always has.
+  const steps = timesToDistances(notes.steps, track.tobCum, track.cum);
+  return placeSteps(steps, anchors, track.length);
 }
