@@ -124,4 +124,28 @@ describe("toGPX", () => {
     const gpx = toGPX("No elevation", [[43.1, -4.7, null]]);
     expect(gpx).not.toContain("<ele>");
   });
+
+  /**
+   * A point with no elevation is written `<trkpt lat="…" lon="…"/>`, and the
+   * build script's regex reader quietly skipped every one — 53 points from
+   * one of the Basque files, 122 from the other, and 10 from a Picos day that
+   * had already shipped 160 m short. A dropped point is a straight line
+   * across whatever was there. `parseGPX` goes through the DOM and always
+   * handled it; this is here so it keeps doing so.
+   */
+  it("reads a point written as a self-closing tag", () => {
+    // A zigzag, so nothing here is collinear enough for `simplify` to drop:
+    // this is testing what is read, not what survives thinning.
+    const xml = `<?xml version="1.0"?><gpx xmlns="http://www.topografix.com/GPX/1/1"><trk><trkseg>
+      <trkpt lat="43.100" lon="-4.600"><ele>300</ele></trkpt>
+      <trkpt lat="43.101" lon="-4.601"/>
+      <trkpt lat="43.100" lon="-4.602"></trkpt>
+      <trkpt lon="-4.603" lat="43.101"/>
+    </trkseg></trk></gpx>`;
+    const { pts } = parseGPX(xml);
+    expect(pts).toHaveLength(4);
+    expect(pts[1]![0]).toBeCloseTo(43.101, 5);
+    expect(pts[3]![1]).toBeCloseTo(-4.603, 5);
+    expect(pts[3]![0]).toBeCloseTo(43.101, 5); // attributes in the other order
+  });
 });

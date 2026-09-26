@@ -187,12 +187,23 @@ export function getProvider(id: string | null | undefined): MapProvider {
   );
 }
 
-/** Is this point roughly within the provider's coverage? */
-export function covers(provider: MapProvider, point: AnyPoint): boolean {
+/**
+ * Is this point, or every point of this route, roughly within coverage?
+ *
+ * A route rather than a point because a day can cross a border: day 6 of the
+ * Basque trip starts in Spain, spends its afternoon in France and comes back
+ * over the water. Asked about its first point alone, the Spanish survey says
+ * yes and then serves nothing for half the walk.
+ */
+export function covers(provider: MapProvider, where: AnyPoint | readonly AnyPoint[]): boolean {
   if (!provider.bounds) return true;
   const [[s, w], [n, e]] = provider.bounds;
-  return point[0] >= s && point[0] <= n && point[1] >= w && point[1] <= e;
+  const inside = (p: AnyPoint) => p[0] >= s && p[0] <= n && p[1] >= w && p[1] <= e;
+  return isRoute(where) ? where.every(inside) : inside(where);
 }
+
+const isRoute = (x: AnyPoint | readonly AnyPoint[]): x is readonly AnyPoint[] =>
+  Array.isArray(x) && typeof x[0] !== "number";
 
 export interface ProviderOption {
   provider: MapProvider;
@@ -207,27 +218,34 @@ export interface ProviderOption {
  * the picker can show them greyed with a reason instead of silently omitting
  * an option the traveller went looking for.
  */
-export function providersFor(point: AnyPoint): ProviderOption[] {
+export function providersFor(where: AnyPoint | readonly AnyPoint[]): ProviderOption[] {
   return MAP_PROVIDERS.map((provider) => ({
     provider,
-    available: covers(provider, point),
+    available: covers(provider, where),
   })).sort((a, b) => (a.available === b.available ? 0 : a.available ? -1 : 1));
 }
 
 /**
  * Which provider to start with.
  *
- * `preferred` is the app's own ordered opinion — the hiking app knows its
- * routes are in the Picos and asks for the Spanish survey first; the boat and
- * the Paris walk ask for the French map. That is a far more reliable signal
- * than trying to infer a country from a coordinate, and it degrades honestly:
- * an imported GPX from somewhere else simply falls through to a worldwide map.
+ * `preferred` is the app's own ordered opinion — the hiking app asks for the
+ * Spanish survey first, the boat and the Paris walk for the French map. That
+ * is a more reliable signal than inferring a country from a coordinate, and
+ * it degrades honestly: a route somewhere else falls through to a worldwide
+ * map rather than to a survey that stops at a border.
+ *
+ * Hand it the whole route where there is one. A preference only counts if it
+ * covers all of it, so a walk that crosses into France is given a map that
+ * has France on it instead of one that runs out at lunchtime.
  *
  * Providers needing an API key are never chosen automatically — a key the
  * traveller has not supplied would mean a blank screen.
  */
-export function suggestProvider(point: AnyPoint, preferred: readonly string[] = []): MapProvider {
-  const usable = (p: MapProvider) => !p.keyName && covers(p, point);
+export function suggestProvider(
+  where: AnyPoint | readonly AnyPoint[],
+  preferred: readonly string[] = [],
+): MapProvider {
+  const usable = (p: MapProvider) => !p.keyName && covers(p, where);
 
   for (const id of preferred) {
     const p = MAP_PROVIDERS.find((x) => x.id === id);

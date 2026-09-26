@@ -300,7 +300,7 @@ export function LibraryPanel({
                 </button>
                 <button
                   onClick={() =>
-                    downloadGPX(h.name, toGPX(h.name, h.pts, false, "Slow Navigator · Picos Hikes"))
+                    downloadGPX(h.name, toGPX(h.name, h.pts, false, "Slow Navigator · Hikes"))
                   }
                 >
                   GPX

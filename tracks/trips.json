@@ -1,0 +1,83 @@
+{
+  "_": [
+    "What the geometry cannot say. Everything structural — which sub-track is",
+    "the spine, where an option branches and rejoins, which waypoints belong to",
+    "which line — is worked out from the file by scripts/build-tracks.mjs.",
+    "",
+    "What is left here is editorial, and it is per traveller as much as per",
+    "route: the day number in the itinerary, which hotel spur was actually",
+    "walked, which options are worth offering as a line of their own, and the",
+    "handful of waypoints that sit beside the route without being on it.",
+    "",
+    "A new trip is its GPX files dropped in this folder plus an entry here.",
+    "Leave an entry out and the build says so rather than shipping it unnamed."
+  ],
+
+  "5_Potes_to_Cosgaya.gpx": {
+    "id": "5_Potes_to_Cosgaya",
+    "name": "Day 1 Potes to Cosgaya",
+    "spurs": ["5 END Oso"],
+    "variants": {
+      "5 OPTION Harder option": {
+        "id": "5_Potes_to_Cosgaya_harder",
+        "name": "Day 1 Potes to Cosgaya (harder option)"
+      }
+    },
+    "drop": ["Casa Trevino", "Apartment El Nial de Potes", "Plaza Capitan Palacios"]
+  },
+
+  "6a_Cosgaya_to_Fuente_De.gpx": {
+    "id": "6a_Cosgaya_to_Fuente_De",
+    "name": "Day 2 Cosgaya to Fuente Dé",
+    "variants": {
+      "6a OPTION Cosgaya to Espinama": {
+        "id": "6a_Cosgaya_to_Fuente_De_harder",
+        "name": "Day 2 Cosgaya to Fuente Dé (harder option)"
+      }
+    },
+    "drop": ["Casa Trevino"]
+  },
+
+  "7a_Fuente_De_High_Picos_circuit.gpx": {
+    "id": "7a_Fuente_De_High_Picos_circuit",
+    "name": "Day 3 Fuente Dé High Picos Circuit"
+  },
+
+  "8a_Fuente_De_Valley_circuit.gpx": {
+    "id": "8a_Fuente_De_Valley_circuit",
+    "name": "Day 4 Fuente Dé Valley Circuit"
+  },
+
+  "7_Espinama_High_Picos_circuit.gpx": {
+    "id": "7_Espinama_High_Picos_circuit",
+    "name": "Espinama High Picos circuit"
+  },
+
+  "6_Bera_to_Hondarribia.gpx": {
+    "id": "6_Bera_to_Hondarribia",
+    "name": "Day 6 Bera to Hondarribia",
+    "variants": {
+      "6c Avoiding Mt Calvaire": {
+        "id": "6_Bera_to_Hondarribia_no_calvaire",
+        "name": "Day 6 Bera to Hondarribia (avoiding Mont du Calvaire)"
+      }
+    }
+  },
+
+  "7_Hondarribia_to_San_Sebastian.gpx": {
+    "id": "7_Hondarribia_to_San_Sebastian",
+    "name": "Day 7 Hondarribia to San Sebastián",
+    "variants": {
+      "7a Easier route": {
+        "id": "7_Hondarribia_to_San_Sebastian_easier",
+        "name": "Day 7 Hondarribia to San Sebastián (easier, off the ridge)"
+      }
+    }
+  },
+
+  "_renames": {
+    "[Parador] Parador Fuente De": "Parador de Fuente Dé",
+    "Parador Fuente De": "Parador de Fuente Dé",
+    "Cable car station": "Fuente Dé cable car"
+  }
+}

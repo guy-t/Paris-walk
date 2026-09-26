@@ -15,7 +15,8 @@ export interface SettingsPanelProps {
   onSave: (s: HikeSettings) => void;
   onClose: () => void;
   /** A point on the current route, used to say which maps reach it. */
-  near?: AnyPoint | null;
+  /** The open route, so the picker can say which maps reach all of it. */
+  near?: AnyPoint | readonly AnyPoint[] | null;
 }
 
 export function SettingsPanel({ settings, onSave, onClose, near }: SettingsPanelProps) {
@@ -23,7 +24,9 @@ export function SettingsPanel({ settings, onSave, onClose, near }: SettingsPanel
   const set = <K extends keyof HikeSettings>(k: K, v: HikeSettings[K]) =>
     setDraft((d) => ({ ...d, [k]: v }));
 
-  const options = useMemo(() => providersFor(near ?? [43.15, -4.75]), [near]);
+  // Greyed-out rows mean "does not reach this walk", so the question has to
+  // be asked about the walk. With nothing open, every provider is offered.
+  const options = useMemo(() => providersFor(near ?? []), [near]);
   const chosen = options.find((o) => o.provider.id === draft.provider)?.provider;
   const [mapKey, setMapKey] = useState(
     () => store.get<string>("map:key:" + (chosen?.keyName ?? "none")) ?? "",

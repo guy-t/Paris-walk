@@ -1,5 +1,5 @@
 /**
- * Picos Hikes.
+ * The hike app.
  *
  * The shell: header, dashboard, map, sheet, and the two panels that slide
  * over them. Everything below this file is either a shared component or a
@@ -7,6 +7,7 @@
  */
 
 import {
+  type AnyPoint,
   addRecord,
   createFormatter,
   downloadGPX,
@@ -83,7 +84,26 @@ export function App() {
   // Which base map, and the URL to actually use. A provider needing a key the
   // walker has not supplied would render a grid of broken tiles, so it falls
   // back rather than showing that.
-  const start = state.track?.pts[0] ?? null;
+  /**
+   * Where the app is, which is wherever its routes are.
+   *
+   * The open hike's own line when there is one, so a map is chosen for the
+   * whole of it and not just its first point — a day that crosses a border
+   * needs a survey that has both sides. Before a hike is open, the start of
+   * the first one in the library: whatever GPX is shipped decides where the
+   * app thinks it is, rather than a coordinate in the Picos written into the
+   * source three times over.
+   */
+  const here = useMemo<AnyPoint | readonly AnyPoint[]>(
+    () => state.track?.pts ?? library.list()[0]?.pts[0] ?? [0, 0],
+    [state.track],
+  );
+  /** The same question, answered as one point, for the map's first view. */
+  const centre = useMemo<LatLon | null>(() => {
+    const p = state.track?.pts[0] ?? library.list()[0]?.pts[0];
+    return p ? [p[0], p[1]] : null;
+  }, [state.track]);
+
   const provider = useMemo(() => {
     const chosen = getProvider(settings.provider);
     const key = chosen.keyName ? store.get<string>(`map:key:${chosen.keyName}`) : null;
@@ -91,8 +111,8 @@ export function App() {
     // the walker picked is honoured, including one whose coverage box does not
     // quite reach — the boxes are approximate and they may know better.
     if (providerTileUrl(chosen, key)) return chosen;
-    return suggestProvider(start ?? [43.15, -4.75], PREFERRED_PROVIDERS);
-  }, [settings.provider, start]);
+    return suggestProvider(here, PREFERRED_PROVIDERS);
+  }, [settings.provider, here]);
 
   const tiles = useMemo(() => {
     const key = provider.keyName ? store.get<string>(`map:key:${provider.keyName}`) : null;
@@ -315,7 +335,7 @@ export function App() {
     }
     downloadGPX(
       `${state.hike.name}_recorded`,
-      toGPX(`${state.hike.name} (recorded)`, trail, true, "Slow Navigator · Picos Hikes"),
+      toGPX(`${state.hike.name} (recorded)`, trail, true, "Slow Navigator · Hikes"),
     );
   }, [state.session, state.hike, show]);
 
@@ -666,7 +686,7 @@ export function App() {
     <>
       <header className="bar">
         <h1 onClick={() => setPanel("library")} title="Choose a hike">
-          {state.hike?.name ?? "Picos Hikes"}
+          {state.hike?.name ?? "Hikes"}
         </h1>
 
         <div className="menu">
@@ -836,7 +856,7 @@ export function App() {
       {panel === "settings" && (
         <SettingsPanel
           settings={settings}
-          near={start}
+          near={state.track?.pts ?? null}
           onClose={() => setPanel("none")}
           onSave={(next) => {
             setSettings(next);
@@ -867,6 +887,7 @@ export function App() {
 
       <div className="mapwrap">
         <MapView
+          center={centre}
           planned={state.track?.pts}
           doneUpTo={doneUpTo}
           trail={trail}
@@ -1070,7 +1091,7 @@ function storageText(): string {
   return lines.join("\n");
 }
 
-const aboutText = (mapName: string): string => `Picos Hikes — part of Slow Navigator.
+const aboutText = (mapName: string): string => `Hikes — part of Slow Navigator.
 Build ${APP_VERSION}.
 
 • Maps: ${mapName}, stored on the phone when you prepare a hike for offline. Change it in Settings.
