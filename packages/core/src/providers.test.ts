@@ -8,6 +8,7 @@ import {
   suggestProvider,
   tileUrl,
 } from "./providers.js";
+import type { AnyPoint } from "./geo.js";
 
 const POTES = [43.153, -4.628] as const; // Picos de Europa, Spain
 const AUXERRE = [47.798, 3.573] as const; // on the Yonne, France
@@ -163,6 +164,35 @@ describe("aerial providers", () => {
     // it has no contours and no path classification.
     expect(suggestProvider(POTES, []).id).not.toBe("pnoa-es");
     expect(suggestProvider(AUXERRE, []).id).not.toBe("ortho-fr");
+  });
+
+  /**
+   * A day can cross a border. Day 6 of the Basque trip starts in Spain,
+   * spends its afternoon in France and comes back over the water — asked
+   * about its first point alone, a national survey says yes and then serves
+   * nothing for half the walk. So the question is asked about the route.
+   */
+  describe("a route rather than a point", () => {
+    const SPAIN: AnyPoint = [43.28, -1.69];
+    const DEEP_FRANCE: AnyPoint = [47.5, 4.5];
+
+    it("covers a route only when it covers all of it", () => {
+      const es = getProvider("ign-es");
+      expect(covers(es, SPAIN)).toBe(true);
+      expect(covers(es, [SPAIN, SPAIN])).toBe(true);
+      expect(covers(es, [SPAIN, DEEP_FRANCE])).toBe(false);
+    });
+
+    it("declines a preference that only reaches the start", () => {
+      // Preferring the Spanish survey, on a line that leaves its box.
+      const chosen = suggestProvider([SPAIN, DEEP_FRANCE], ["ign-es", "opentopo"]);
+      expect(chosen.id).not.toBe("ign-es");
+      expect(covers(chosen, [SPAIN, DEEP_FRANCE])).toBe(true);
+    });
+
+    it("treats an empty route as no constraint, so a picker offers everything", () => {
+      expect(covers(getProvider("ign-es"), [])).toBe(true);
+    });
   });
 });
 

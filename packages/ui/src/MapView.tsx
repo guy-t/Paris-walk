@@ -34,6 +34,14 @@ export interface MapMarker {
 }
 
 export interface MapViewProps {
+  /**
+   * Where to open, before a route has been fitted.
+   *
+   * Optional, and the whole world when it is missing: a component shared by a
+   * hiking app, a boat and a city walk cannot have an opinion about which
+   * valley to show, and one hard-coded here showed the Picos to all three.
+   */
+  center?: LatLon | null;
   /** The planned route. */
   planned?: readonly AnyPoint[];
   /** How far along the planned route we are, metres — drawn in "done" grey. */
@@ -78,6 +86,7 @@ const EDGE = 0.22;
 const DONE_REDRAW_MS = 3000;
 
 export function MapView({
+  center,
   planned,
   doneUpTo,
   trail,
@@ -142,7 +151,10 @@ export function MapView({
       zoomControl: false,
       preferCanvas: true, // thousands of points; SVG would crawl
       zoomSnap: 0.5,
-    }).setView([43.15, -4.75], 11);
+      // A first view before anything is fitted. The caller's own route, so a
+      // map that opens on the Picos has to be a map of the Picos rather than
+      // a coordinate compiled into a shared component.
+    }).setView(center ?? [0, 0], center ? 11 : 1);
     mapRef.current = map;
 
     L.tileLayer(tileUrl, { maxZoom, maxNativeZoom, attribution: tileAttribution }).addTo(map);

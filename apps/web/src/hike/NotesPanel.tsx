@@ -22,8 +22,34 @@ export interface NotesPanelProps {
   /** Which variant the walker is on, and how to change it. */
   variant: string;
   onVariant: (id: string) => void;
+  /**
+   * The day's lines, and which one is open.
+   *
+   * These come from the library rather than from the notes' own headings,
+   * which is a correction. The pills used to be built from the `## ` lines in
+   * the imported file and matched to a line *by position*, so they appeared
+   * only once notes had been imported and only worked when the booklet listed
+   * exactly the variants the library holds, in the same order. The Basque
+   * day 3 booklet lists six walking options against two lines, and before its
+   * notes are typed up there are none at all — leaving the choice four taps
+   * away in the library, at a signpost.
+   */
+  lines?: readonly { id: string; name: string }[];
+  onLine?: (id: string) => void;
+  currentLine?: string | null;
   onImport: () => void;
   onForget: () => void;
+}
+
+/**
+ * A line's name with the day stripped off, because the pills sit under a
+ * header already saying which day it is. "Day 3 Hondarribia to San Sebastián
+ * (easier, off the ridge)" becomes "easier, off the ridge", and a main line
+ * with nothing in brackets becomes "Main route".
+ */
+function shortName(name: string): string {
+  const m = /\(([^)]+)\)\s*$/.exec(name);
+  return m ? m[1]! : "Main route";
 }
 
 export function NotesPanel({
@@ -34,10 +60,37 @@ export function NotesPanel({
   fmt,
   variant,
   onVariant,
+  lines,
+  onLine,
+  currentLine,
   onImport,
   onForget,
 }: NotesPanelProps) {
   const currentRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * Which line of the day, above everything else in the tab.
+   *
+   * Shown whenever the day has more than one, notes or no notes: the line is
+   * what the map draws, what the distance counts down and what the ETA is
+   * for, so it is worth changing even on a day whose instructions have not
+   * been typed up.
+   */
+  const chooser =
+    lines && lines.length > 1 && onLine ? (
+      <div className="variants" role="group" aria-label="Which route are you walking?">
+        {lines.map((l) => (
+          <button
+            key={l.id}
+            className={l.id === currentLine ? "on" : ""}
+            aria-pressed={l.id === currentLine}
+            onClick={() => onLine(l.id)}
+          >
+            {shortName(l.name)}
+          </button>
+        ))}
+      </div>
+    ) : null;
 
   // Follow the walk: when the current step changes, bring it into view
   // rather than making someone scroll to find where they are.
@@ -48,6 +101,7 @@ export function NotesPanel({
   if (!notes) {
     return (
       <div className="sheet-empty">
+        {chooser}
         <p>
           No route notes for this hike yet. Import the day’s instructions and they will be
           placed along the line, so the app can tell you which one you are on.
@@ -68,9 +122,13 @@ export function NotesPanel({
 
   return (
     <div className="notes">
-      {/* Only worth showing when the day actually forks. */}
-      {notes.variants.length > 1 && (
-        <div className="variants" role="group" aria-label="Which route are you walking?">
+      {chooser}
+      {/* The notes' own variants, where a booklet prints more of them than the
+          library has lines — the text can still be switched when the geometry
+          cannot. Hidden when the chooser above already covers the same
+          ground, so a day does not show two rows of pills saying one thing. */}
+      {notes.variants.length > 1 && notes.variants.length !== (lines?.length ?? 0) && (
+        <div className="variants" role="group" aria-label="Which instructions are you following?">
           {notes.variants.map((v) => (
             <button
               key={v.id}

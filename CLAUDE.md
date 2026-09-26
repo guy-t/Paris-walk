@@ -1,8 +1,16 @@
 # Slow Navigator
 
-Three navigation companions for travelling slowly: a Picos de Europa hiking
-app, a boat companion for the Yonne and the Canal du Nivernais, and a Paris
-walking guide. They are used on a phone, outdoors, often with no signal.
+Three navigation companions for travelling slowly: a hiking app for a
+multi-day walk, a boat companion for the Yonne and the Canal du Nivernais,
+and a Paris walking guide. They are used on a phone, outdoors, often with no
+signal.
+
+The hike app was built for a week in the Picos de Europa and that week has
+been walked. It is not a Picos app: a trip is its GPX files dropped in
+`tracks/` with an entry in `tracks/trips.json`, and the Basque days — Bera to
+Hondarribia, Hondarribia to San Sebastián — went in that way without a line
+of hand-written geometry. Where the Picos still appear below it is as the
+case that taught something, not as a thing the code depends on.
 
 The repository is still named `Paris-walk`, so the GitHub Pages site is
 `https://guy-t.github.io/Paris-walk/`. The local clone is usually
@@ -22,7 +30,7 @@ packages/core     geometry, map-matching, the GPS tracker, sessions, GPX,
                   sun times, Overpass and Wikipedia clients, offline tiles,
                   the forecast client, the barometric maths and the route-notes parser.
                   No React, no Leaflet, no DOM beyond the browser APIs that
-                  are the point. 271 unit tests.
+                  are the point. 275 unit tests.
 packages/ui       MapView, ElevationProfile, Sheet, StatTile, Toast, and the
                   geolocation / wake-lock / service-worker hooks.
 apps/web          one Vite app, one HTML entry per guide, two build targets.
@@ -73,10 +81,10 @@ real URL only once that app has been walked with.
 When porting the remaining two, read the original HTML first — it is the
 specification, and its constants were tuned against real journeys.
 
-**The two ports are deliberately parked** until after the Picos hiking week.
-The hike app is what is being walked with; changing the other two now buys
-nothing and every change is one more thing that could be wrong in a valley
-with no signal. Do not start a port without being asked.
+**The two ports are still parked.** They were parked for the Picos week,
+which is done; they stay parked because the hike app is the one being walked
+with and the next trip is the Basque coast. Do not start a port without being
+asked.
 
 ## Things that will catch you out
 
@@ -120,6 +128,19 @@ requirement, not a coincidence, and it is why Google is absent: its terms
 explicitly forbid offline use and pre-fetching. Coverage boxes are approximate
 and overlap near borders on purpose; which map to prefer is the app's call via
 `PREFERRED_PROVIDERS`, not the geometry's.
+
+`covers`, `providersFor` and `suggestProvider` take **a route** as well as a
+point, and a preference only counts if it covers all of it. A day can cross a
+border — day 6 of the Basque trip starts in Spain, spends its afternoon in
+France and comes back over the water — and asked about its first point alone
+a national survey says yes and then serves nothing for half the walk.
+
+Not yet settled: `ign-es` declares a box reaching 44°N/4.4°E, which is most of
+southern France, so it still claims day 6 in full. Whether the Spanish server
+actually serves tiles there could not be measured from CI — the proxy refuses
+`ign.es` — so it wants looking at on the phone: open day 6, pan to Hendaye,
+see whether the map is there. If it is blank, the box is wrong rather than the
+rule.
 
 **Marker classes are namespaced `mk-<kind>`.** A bare `.poi` on a map marker
 matched the sheet's list-card rule and inherited its 12px padding, silently
@@ -354,28 +375,76 @@ than not anchoring. Everything between anchors is interpolated, which
 rescales the printed kilometres onto measured ones. Congarna, Beares and
 San Pelayo land exactly; the fit elsewhere is within about 150 m.
 
-**The embedded library is generated, not typed.** `apps/web/src/hike/tracks.json`
-is built from `tracks/*.gpx` by `scripts/build-tracks.mjs`, and `deploy.yml`
-runs it with `--check` so the two cannot drift. It exists because the
-hand-made copy shipped the whole of each file: one day's GPX carries the
-route as several named sub-tracks — a `SPINE`, an `OPTION` for the harder
-alternative, an `END` per possible hotel — and `parseGPX` concatenates every
-`<trkpt>` in the document, which is the only honest thing to do with a file
-it has never seen. Day 1 was therefore 34.6 km of line for a 14.5 km walk,
-with a straight-line jump between each piece, and every distance, ETA and
-next-waypoint built on it was wrong. It is 14.54 km now, and the worst
-waypoint residual across the four days went from 1136 m to 19 m.
+**The embedded library is generated, and its structure is derived.**
+`apps/web/src/hike/tracks.json` is built from `tracks/*.gpx` by
+`scripts/build-tracks.mjs`, and `deploy.yml` runs it with `--check` so the two
+cannot drift. It exists because the hand-made copy shipped the whole of each
+file: one day's GPX carries the route as several named sub-tracks — a spine,
+an option or two, a spur per possible hotel — and `parseGPX` concatenates
+every `<trkpt>` in the document, which is the only honest thing to do with a
+file it has never seen. Day 1 was therefore 34.6 km of line for a 14.5 km
+walk, with a straight-line jump between each piece. It is 14.54 km now, and
+the worst waypoint residual across the four days went from 1136 m to 19 m.
 
-A harder option is *spliced* into the main line where it branches and
-rejoins, so the variant is a whole day rather than the middle of one, and it
-ships as its own hike. The `without` list in `LINES` cannot be derived from
-the geometry and so is written down: waypoint `A` on day 1 is metres from
-the monastery the main route also passes, so a 150 m rule would keep it and
-anchor the harder option's notes onto a line it does not walk, while `Hotel
-Cosgaya` is 40 m from the end of the line and has to stay although the spur
-to its door does not. The ids are frozen — they key `hike:notes:<id>` and
-the saved session, so renaming one on the eve of a walk loses both. The day
-number lives in the display name instead.
+That was first fixed with a hand-written manifest naming, per line, which
+sub-tracks to concatenate, which to splice, and which waypoints to leave out.
+It worked for four days in the Picos and did not generalise: the next trip's
+files carry nine and twenty sub-tracks and name their roles differently, so
+the whole thing would have been written again by eye.
+
+**The structure is worked out from the geometry now.** A sub-track with both
+ends on the spine is an option and is spliced where it branches and rejoins;
+one end on the spine and it is a spur onto or off the route; neither and it
+is detached and reported rather than guessed at. The spine is the longest
+track in the file. Measured against the four Picos days, this reproduces the
+hand-written manifest's lines **byte for byte**, and it reads the Basque
+files — for which nobody wrote a manifest — unchanged.
+
+Waypoints are assigned by a *comparative* rule, which is what the old
+`without` list was standing in for: nearest sibling line wins, and within
+30 m of each is both. A plain radius cannot do it — waypoint `A` on day 1 is
+43 m from the main line, because the two variants run close there, and 0 m
+from the harder option it belongs to. Measured, that agrees with the
+hand-written list everywhere except `Ermita Catalina` (78 m from the main
+line, 191 m from the harder one, so geometry puts it on the main route where
+the list had it on the option) and waypoint `3` on day 2, which the harder
+option genuinely passes within 11 m of and now appears on both.
+
+**A spur's name does not say which way it is drawn.** `6d END Parador` runs
+from the hotel *back to* the route and `SANSEbay Hotel start` runs from the
+route *out to* the hotel — each the opposite of what it is called. Taking the
+drawing at face value walks day 6 from the Parador to Bera and only then to
+Hondarribia. So a spur is placed by *where along the spine it attaches* —
+nearer the start, walked before; nearer the end, walked after — and its points
+are reversed if needed so the joining end abuts the route. With the Parador
+spur on, day 6 is 20.19 km against a printed 20 km, and ends 6 m from the
+waypoint.
+
+The build reports the largest step between two consecutive points of each
+composed line. A spur joined at the wrong end draws a line across country, and
+a map is silent about it. Only two lines trip the 200 m threshold and both are
+the same thing: day 3 and the Espinama circuit ride the Fuente Dé cable car,
+which nobody walked.
+
+`tracks/trips.json` keeps only what geometry cannot say, and most of it is
+per traveller rather than per route: the day number in the itinerary, which
+hotel spur was actually walked, which options are worth a line of their own,
+and the few waypoints that sit beside a route without being on it. **A new
+trip is its GPX dropped in `tracks/` plus an entry there.** Leaving the entry
+out fails the build rather than shipping a day with no name, and the build
+prints everything in each file it was not asked to ship, so a route nobody
+offered is visible rather than silently missing.
+
+**A point with no elevation is written `<trkpt lat="…" lon="…"/>`**, and the
+script's regex reader required a body and a closing tag, so it skipped every
+one of them — silently. 53 points from one Basque file, 122 from the other,
+and **10 from day 4 of the Picos, which had already shipped at 8.25 km when
+it is 8.41 km**. A dropped point is a straight line across whatever was
+there: the exact fault this script exists to prevent, reintroduced by its own
+parser. It reads either form of tag and attributes in any order now, and it
+counts the opening tags and refuses to build if it did not read that many.
+`parseGPX`, which is what the walker's own import goes through, uses the DOM
+and never had the bug; there is a test so it stays that way.
 
 **A day that forks is two hikes but one day.** The harder option ships as its
 own line, because one GPX document is one polyline to the map-matcher. Every
@@ -556,6 +625,52 @@ in a second, and a cue moving backwards is the walk being re-matched, not a
 junction. Measured on the built app against day 1: 25 buzzes over 14.5 km,
 one of them the warning.
 
+**Not every booklet numbers its steps by distance.** The Picos days printed
+a cumulative time *and* a cumulative distance; the Basque days print the time
+only, with the minutes to the next step in a trailing bracket and distances
+buried inside the sentence. `parseNotes` required a distance, so it read
+**zero steps** from a whole day and the walker got no cue at all.
+
+`STEP_TIME_ONLY` reads them, and `timesToDistances` gives each one a distance
+before anything else happens — `placeSteps` works in metres from end to end,
+so a time-only booklet is converted, not placed differently. The conversion
+goes through the track's own `tobCum`, which is the point: scaling the clock
+straight onto the line puts an hour of the Jaizkibel ridge and an hour of the
+coast path afterwards at the same distance. Measured on the real day-2 line
+against the three timing points the booklet prints beside waypoints `[3]`,
+`[5]` and `[6]` — mean error **221 m** through the terrain against **1678 m**
+scaling the clock flat. And that is only the starting guess: the bracketed
+waypoints still pin what they touch, so the terrain carries the stretches
+nothing else anchors.
+
+**The ends of a day are anchors nobody writes down.** Outside the outermost
+bracketed waypoint there is nothing to say what a printed hour is worth, so
+the last instruction extrapolates on the scale of whatever stretch came
+before it: on a 20 km day anchored only in the middle, it landed at 16 km,
+four kilometres short of the hotel it names. The notes begin where the line
+begins and end where it ends, so those two are added as pairs — on the same
+terms as any other extra candidate, only where they fit outside what is
+already agreed, never displacing it. Measured against the real day-1 notes:
+identical residuals either way, 17 m worst and 2 m mean over nine anchored
+steps, with only the first instruction moving, from 10 m along to the door it
+is written from.
+
+**The route pills come from the library, not from the notes.** They used to
+be built from the `## ` headings in the imported file and matched to a line
+*by position*, which meant they appeared only once notes had been typed up,
+and only worked when the booklet listed exactly the variants the library
+holds, in the same order. Day 3's booklet lists six walking options against
+two lines. So the chooser is the day's `library.family` now, shown whenever
+there is more than one line, notes or no notes — the line is what the map
+draws, what the distance counts down and what the ETA is for, so it is worth
+changing on a day whose instructions have not been typed up. Measured on the
+built app: one tap switches, and the session survives it — 2440 m walked,
+2605 m of maxProg, 20 trail points and the same start, before and after.
+
+The notes' own variant pills are still there for a booklet that prints more
+variants than the library has lines, and hidden when the two agree so a day
+never shows two rows of pills saying the same thing.
+
 **A cue read off the distance walked needs a manual override.** `stepAt`
 picks the last instruction at or behind the walker, which is right until the
 walk and the notes part company: a missed turn, a stretch covered with the
@@ -677,7 +792,7 @@ Pages CDN caches 404s, so a path a deploy just added keeps answering 404.
 ```bash
 pnpm install
 pnpm typecheck          # tsc --build across all projects
-pnpm test               # vitest, 358 tests
+pnpm test               # vitest, 362 tests
 pnpm build              # web build for Pages
 pnpm --filter @slownav/web build:native   # payload for the APK
 pnpm --filter @slownav/web dev            # local dev server
@@ -720,6 +835,17 @@ done by hand once — the settings API needs repo-admin rights the default
 
 ## Not done yet
 
+- **Composing a day from its segments.** The library ships a line per *option*
+  — spine, plus the spine with an option spliced in — and that covers a
+  harder alternative or an easier off-ridge route. It does not cover the rest
+  of what the Basque files hold: a taxi start that joins at waypoint `[3]`, an
+  escape route that leaves at `[5]` and ends in a different village, a bus
+  that saves the last 8 km, and eleven possible hotel spurs on day 7 alone.
+  Enumerating those as lines is (ridge | easier) × (walk | bus) × 5 starts ×
+  11 ends = 220 lines for one day. They want composing at open time instead,
+  from the `option` / `onto` / `off` classification the build already derives,
+  with a row of pills per choice rather than a row of line names. The hotel is
+  a trip-level setting, not a line: chosen once, composed onto every day.
 - Canal and walk ports.
 - **The first 675 m of day 1 are extrapolated**, backwards from waypoint
   `1`, because nothing in Potes anchors: `Casa Cayo` is named mid-sentence

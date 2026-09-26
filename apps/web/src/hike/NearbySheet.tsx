@@ -206,7 +206,10 @@ export function NearbySheet({
               )}
               <a
                 className="btn"
-                href={`https://www.google.com/search?q=${encodeURIComponent(`${s.name} Picos de Europa`)}`}
+                // Searched where it actually is rather than in a region
+                // written into the source. A bar called Máximo is ambiguous
+                // everywhere; a bar called Máximo at these coordinates is not.
+                href={`https://www.google.com/maps/search/${encodeURIComponent(s.name)}/@${s.lat},${s.lon},16z`}
                 target="_blank"
                 rel="noopener noreferrer"
               >
