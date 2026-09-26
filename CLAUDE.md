@@ -410,6 +410,22 @@ line, 191 m from the harder one, so geometry puts it on the main route where
 the list had it on the option) and waypoint `3` on day 2, which the harder
 option genuinely passes within 11 m of and now appears on both.
 
+**A spur's name does not say which way it is drawn.** `6d END Parador` runs
+from the hotel *back to* the route and `SANSEbay Hotel start` runs from the
+route *out to* the hotel — each the opposite of what it is called. Taking the
+drawing at face value walks day 6 from the Parador to Bera and only then to
+Hondarribia. So a spur is placed by *where along the spine it attaches* —
+nearer the start, walked before; nearer the end, walked after — and its points
+are reversed if needed so the joining end abuts the route. With the Parador
+spur on, day 6 is 20.19 km against a printed 20 km, and ends 6 m from the
+waypoint.
+
+The build reports the largest step between two consecutive points of each
+composed line. A spur joined at the wrong end draws a line across country, and
+a map is silent about it. Only two lines trip the 200 m threshold and both are
+the same thing: day 3 and the Espinama circuit ride the Fuente Dé cable car,
+which nobody walked.
+
 `tracks/trips.json` keeps only what geometry cannot say, and most of it is
 per traveller rather than per route: the day number in the itinerary, which
 hotel spur was actually walked, which options are worth a line of their own,

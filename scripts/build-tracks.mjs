@@ -66,6 +66,15 @@ const JOIN_M = 25;
 const SAME_M = 30;
 
 /**
+ * A step between two points worth looking at.
+ *
+ * Track points on these files land 50-100 m apart at their sparsest, so
+ * anything past this is either something nobody walked — day 3 takes the
+ * Fuente Dé cable car — or a seam that did not meet.
+ */
+const GAP_M = 200;
+
+/**
  * Beyond this a waypoint is not on this line at all.
  *
  * Generous on purpose. Everything in a day's file belongs to that day, so
@@ -171,10 +180,20 @@ const metres = (pts) => {
  * What a sub-track is, from where its ends sit relative to the spine.
  *
  * Both ends on it and it is an option: the walk leaves the line and comes
- * back, so it can be spliced. One end on it and it is a spur — a taxi drop
- * walked in, a hotel walked out to — which lengthens a particular traveller's
- * day but is not a variant of it. Neither end and the file is saying
- * something this does not understand, which is reported rather than guessed.
+ * back, so it can be spliced. One end on it and it is a spur — a hotel walked
+ * out to, a taxi drop walked in from — which lengthens a particular
+ * traveller's day but is not a variant of it. Neither end and the file is
+ * saying something this does not understand, which is reported rather than
+ * guessed at.
+ *
+ * A spur is walked *before* the route when it meets it nearer the start and
+ * *after* when it meets it nearer the end, and that is worked out from where
+ * it attaches rather than from which way it happens to be drawn. The files
+ * are not consistent about that and their names are no help: `6d END Parador`
+ * runs from the hotel back to the route and `SANSEbay Hotel start` runs from
+ * the route out to the hotel, each the opposite of what it is called. Taking
+ * the drawing at face value would have walked day 6 from the Parador to Bera
+ * and then to Hondarribia.
  */
 function classify(spine, pts) {
   const a = nearest(spine, pts[0]);
@@ -182,9 +201,19 @@ function classify(spine, pts) {
   const onA = a.dist <= JOIN_M;
   const onB = b.dist <= JOIN_M;
   if (onA && onB) return { kind: "option", from: a.idx, to: b.idx, a, b };
-  if (onB) return { kind: "onto", from: b.idx, to: b.idx, a, b };
-  if (onA) return { kind: "off", from: a.idx, to: a.idx, a, b };
-  return { kind: "detached", a, b };
+  if (!onA && !onB) return { kind: "detached", a, b };
+
+  const touch = onA ? a : b;
+  const before = touch.idx < spine.length - 1 - touch.idx;
+  return {
+    kind: before ? "onto" : "off",
+    at: touch.idx,
+    // Orient it as it is walked: onto the route, its last point is the join;
+    // off the route, its first point is.
+    pts: onA === before ? [...pts].reverse() : pts,
+    a,
+    b,
+  };
 }
 
 /** The spine with an option sewn in where it branches and rejoins. */
@@ -257,9 +286,10 @@ for (const file of files) {
     if (r.kind === "detached") throw new Error(`tracks/${file}: spur "${n}" does not touch the route`);
     return r;
   });
-  // A spur onto the line is walked before it; one off it, after.
-  const before = spurs.filter((s) => s.kind === "onto").flatMap((s) => s.track.pts);
-  const after = spurs.filter((s) => s.kind !== "onto").flatMap((s) => s.track.pts);
+  // Oriented by `classify`, so each one abuts the route it is joined to
+  // rather than doubling back from wherever the file happened to start it.
+  const before = spurs.filter((s) => s.kind === "onto").flatMap((s) => s.pts);
+  const after = spurs.filter((s) => s.kind === "off").flatMap((s) => s.pts);
 
   const wanted = spec.variants ?? {};
   for (const n of Object.keys(wanted)) {
@@ -303,7 +333,34 @@ for (const file of files) {
     });
   });
 
-  report.push({ file, spine: spine.name, roles, used: new Set([...spurNames, ...Object.keys(wanted)]) });
+  // The largest step between two raw points of the composed line, before
+  // simplify thins the straight stretches. A spur joined at the wrong end, or
+  // an option spliced at the wrong point, shows up here as a line drawn
+  // across country — the fault this whole script exists to prevent, and a
+  // silent one on a map. A real gap is not always a fault: day 3 rides the
+  // Fuente Dé cable car and jumps 1187 m because nobody walked that.
+  const gaps = lines.map((l) => {
+    let max = 0;
+    let at = 0;
+    let run = 0;
+    for (let i = 1; i < l.pts.length; i++) {
+      const d = haversine(l.pts[i - 1], l.pts[i]);
+      run += d;
+      if (d > max) {
+        max = d;
+        at = run;
+      }
+    }
+    return { name: l.name, max, at };
+  });
+
+  report.push({
+    file,
+    spine: spine.name,
+    roles,
+    gaps,
+    used: new Set([...spurNames, ...Object.keys(wanted)]),
+  });
 }
 
 const json = JSON.stringify(built) + "\n";
@@ -323,6 +380,16 @@ if (process.argv.includes("--check")) {
         `${String(h.wpts.length).padStart(2)} wpts  ${h.name}`,
     );
   }
+  const jumps = report.flatMap((r) => r.gaps).filter((g) => g.max > GAP_M);
+  if (jumps.length) {
+    console.log(`\nsteps over ${GAP_M} m between two points — drawn on the map as a straight line:`);
+    for (const g of jumps) {
+      console.log(
+        `  ${g.name.padEnd(54)} ${String(Math.round(g.max)).padStart(5)} m at ${(g.at / 1000).toFixed(2)} km`,
+      );
+    }
+  }
+
   // Everything in the files that is not shipped, so a route nobody offered is
   // visible rather than silently missing.
   for (const r of report) {
@@ -335,7 +402,7 @@ if (process.argv.includes("--check")) {
           ? `option, rejoins after ${(metres(s.track.pts) / 1000).toFixed(2)} km`
           : s.kind === "detached"
             ? `detached (${Math.round(Math.min(s.a.dist, s.b.dist))} m from the route at its nearest)`
-            : `spur ${s.kind === "onto" ? "onto" : "off"} the route, ${(metres(s.track.pts) / 1000).toFixed(2)} km`;
+            : `${(metres(s.track.pts) / 1000).toFixed(2)} km spur, walked ${s.kind === "onto" ? "before the route" : "after the route"}`;
       console.log(`  ${s.track.name.padEnd(36)} ${where}`);
     }
   }
