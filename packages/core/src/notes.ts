@@ -327,6 +327,13 @@ function endsAt(text: string, anchors: readonly NoteAnchor[]): NoteAnchor | null
  * It is a starting guess, not an answer: the bracketed waypoints still pin
  * what they touch and `placeSteps` rescales between them, so the terrain only
  * has to carry the stretches nothing else anchors.
+ *
+ * The clock is counted from the file's first step, not from 0:00. A leg that
+ * starts part-way through a booklet's day — the coast path from the Pasaia
+ * ferry, printed from 4:10 — keeps the times as printed; measured from zero,
+ * its first instruction was read as sixty per cent of the way along a line it
+ * actually starts. Every file that does start at 0:00 converts exactly as
+ * before.
  */
 export function timesToDistances(
   steps: readonly NoteStep[],
@@ -337,13 +344,14 @@ export function timesToDistances(
   // rather than half-converted.
   if (!steps.length || steps.some((s) => s.noteM != null)) return [...steps];
   const times = steps.map((s) => s.time).filter((t): t is number => t != null);
-  const last = Math.max(0, ...times);
+  const first = times.length ? Math.min(...times) : 0;
+  const span = Math.max(0, ...times) - first;
   const totalTob = tobCum[tobCum.length - 1] ?? 0;
-  if (!times.length || last <= 0 || totalTob <= 0 || cum.length !== tobCum.length) {
+  if (!times.length || span <= 0 || totalTob <= 0 || cum.length !== tobCum.length) {
     return [...steps];
   }
 
-  const scale = totalTob / last;
+  const scale = totalTob / span;
   const at = (seconds: number): number => {
     const target = Math.max(0, Math.min(totalTob, seconds * scale));
     let lo = 0;
@@ -359,7 +367,7 @@ export function timesToDistances(
     return cum[i - 1]! + (cum[i]! - cum[i - 1]!) * f;
   };
 
-  return steps.map((s) => (s.time == null ? s : { ...s, noteM: at(s.time) }));
+  return steps.map((s) => (s.time == null ? s : { ...s, noteM: at(s.time - first) }));
 }
 
 export function placeSteps(
