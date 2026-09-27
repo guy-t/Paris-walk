@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Point3 } from "./geo.js";
-import { processTrack, toblerSpeed } from "./track.js";
+import { fillElevations, processTrack, toblerSpeed } from "./track.js";
 
 const LAT = 43.15;
 const DEG_PER_M_LON = 1 / (Math.cos((LAT * Math.PI) / 180) * 111320);
@@ -32,6 +32,66 @@ describe("toblerSpeed", () => {
 
   it("scales with the walker's pace", () => {
     expect(toblerSpeed(0.1, 6)).toBeCloseTo(toblerSpeed(0.1, 3) * 2, 6);
+  });
+});
+
+describe("toblerSpeed uphill", () => {
+  it("does not depend on the offset, because uphill it cancels", () => {
+    // exp(-3.5·|s+k|) / exp(-3.5·k) is exp(-3.5·s) for every s >= 0, whatever k
+    // is. So the 0.05 the app uses in place of Tobler's 0.1 changes nothing
+    // about climbs — it only slows descents, which is not what its comment
+    // claimed it was for. Recorded so the next person does not re-derive it.
+    for (const slope of [0, 0.05, 0.1, 0.2, 0.3, 0.4]) {
+      expect(toblerSpeed(slope, 4.2)).toBeCloseTo((4.2 / 3.6) * Math.exp(-3.5 * slope), 9);
+    }
+  });
+});
+
+describe("fillElevations", () => {
+  const line = (eles: (number | null)[]) =>
+    eles.map((e, i) => [LAT, -4.75 + i * 100 * DEG_PER_M_LON, e] as const);
+
+  it("interpolates a gap along the line", () => {
+    const out = fillElevations(line([100, null, null, 400]));
+    expect(out.map((p) => Math.round(p[2]))).toEqual([100, 200, 300, 400]);
+  });
+
+  it("holds the outermost reading flat rather than extrapolating", () => {
+    // The six points at the start of day 4 of the Picos state no elevation.
+    // With nothing before them to slope from, inventing a gradient would be
+    // guessing; holding the first real reading adds no climb that is not there.
+    const out = fillElevations(line([null, null, 1098, 1105, null]));
+    expect(out.map((p) => Math.round(p[2]))).toEqual([1098, 1098, 1098, 1105, 1105]);
+  });
+
+  it("keeps a genuine zero, which is sea level and not a missing reading", () => {
+    // The coast path into San Sebastián really does read 0 m, and eight of its
+    // points do. Coercing a missing reading to 0 made those indistinguishable.
+    const out = fillElevations(line([0, 0, 12]));
+    expect(out.map((p) => p[2])).toEqual([0, 0, 12]);
+  });
+
+  it("adds no climb where a missing reading used to invent a cliff", () => {
+    // Day 4 of the Picos, in miniature: the first points state nothing, the
+    // rest climb gently. The real ascent is tens of metres, and the `|| 0`
+    // reported it as a climb out of the sea — 1469 m against a real 371 m.
+    const eles = [null, null, 1100, 1110, 1120, 1130, 1140, 1150];
+    const filled = processTrack(fillElevations(line(eles)), 4.2);
+    const zeroed = processTrack(
+      line(eles).map((p) => [p[0], p[1], p[2] ?? 0] as Point3),
+      4.2,
+    );
+    expect(filled.up).toBeLessThan(60);
+    expect(filled.minEle).toBeGreaterThan(1000);
+    expect(zeroed.up).toBeGreaterThan(filled.up * 10);
+    // And the ETA is read off that profile, so it was wrong too.
+    expect(zeroed.tobler).toBeGreaterThan(filled.tobler * 1.5);
+  });
+
+  it("treats a line with no elevations at all as flat", () => {
+    const out = fillElevations(line([null, null, null]));
+    expect(out.map((p) => p[2])).toEqual([0, 0, 0]);
+    expect(processTrack(out, 4.2).up).toBe(0);
   });
 });
 

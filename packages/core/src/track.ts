@@ -5,6 +5,58 @@
 
 import { cumulative, haversine, type AnyPoint, type Point3 } from "./geo.js";
 
+/**
+ * Fill in the points that stated no elevation, interpolating along the line
+ * between the nearest ones that did.
+ *
+ * A GPX point with no elevation is written `<trkpt lat="…" lon="…"/>`, and
+ * both readers turned that into `0` with a `|| 0`. Sea level is a real
+ * elevation, so nothing downstream could tell a missing reading from a
+ * genuine one, and the profile got a cliff to the bottom of the sea and back.
+ *
+ * Measured on the shipped library: the six points at the start of day 4 of
+ * the Picos have no elevation, and the app reported **1469 m of climb for a
+ * walk that climbs 371 m** — the headline figure on the dashboard, four times
+ * too big, on a day between 886 m and 1219 m. Day 2 of the Basque coast has
+ * five, one of them mid-route, which invented 75 m of climb and 17 minutes of
+ * ETA on a walk they were about to do.
+ *
+ * So a missing reading arrives here as `null` and is interpolated. Outside the
+ * outermost known point it is held flat, which is the only honest thing to do
+ * with no second reading to slope towards. A line where nothing states an
+ * elevation is flat at zero, as it always was: there is no profile to recover,
+ * and Tobler then gives the pace on the flat, which is the right answer.
+ */
+export function fillElevations(pts: readonly (readonly [number, number, number | null])[]): Point3[] {
+  const cum = cumulative(pts.map((p) => [p[0], p[1]] as AnyPoint));
+  const known: number[] = [];
+  for (let i = 0; i < pts.length; i++) if (pts[i][2] != null) known.push(i);
+  if (!known.length) return pts.map((p) => [p[0], p[1], 0]);
+
+  const out: Point3[] = [];
+  let seen = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const ele = pts[i][2];
+    if (ele != null) {
+      out.push([pts[i][0], pts[i][1], ele]);
+      continue;
+    }
+    while (seen < known.length && known[seen]! < i) seen++;
+    const after = known[seen];
+    const before = seen > 0 ? known[seen - 1] : undefined;
+    let v: number;
+    if (before == null) v = pts[after!][2]!;
+    else if (after == null) v = pts[before][2]!;
+    else {
+      const span = cum[after]! - cum[before]!;
+      const f = span > 0 ? (cum[i]! - cum[before]!) / span : 0;
+      v = pts[before][2]! + (pts[after][2]! - pts[before][2]!) * f;
+    }
+    out.push([pts[i][0], pts[i][1], v]);
+  }
+  return out;
+}
+
 export interface ProcessedTrack {
   pts: readonly Point3[];
   /** Distance from the start to each point, metres. */
