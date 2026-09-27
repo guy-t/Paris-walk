@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseDistance, parseNotes, placeSteps, stepAt, type NoteAnchor } from "./notes.js";
+import { parseDistance, parseNotes, placeSteps, stepAt, timesToDistances, type NoteAnchor } from "./notes.js";
 
 /** Shaped exactly like a transcribed page, asides and all. */
 const SAMPLE = `# Vale to Hilltop
@@ -294,6 +294,29 @@ describe("placeSteps, when a name has several positions on the track", () => {
     );
     expect(placed[0]?.prog).toBe(100);
     expect(placed[2]?.prog).toBe(2100);
+  });
+});
+
+describe("timesToDistances", () => {
+  // A 3 km line that takes 30 minutes by Tobler, evenly: time and distance
+  // agree everywhere, so any disagreement below is the clock being misread.
+  const cum = [0, 1000, 2000, 3000];
+  const tobCum = [0, 600, 1200, 1800];
+  const metres = (text: string) =>
+    timesToDistances(parseNotes(text).steps, tobCum, cum).map((s) => Math.round(s.noteM ?? -1));
+
+  it("spreads a day printed from 0:00 across the whole line", () => {
+    expect(metres("# Day\n\n0:00 Leave the hotel.\n\n1:00 Cross the bridge.\n\n2:00 Arrive.")).toEqual([
+      0, 1500, 3000,
+    ]);
+  });
+
+  it("counts the clock from the first step, for a leg printed part-way through a day", () => {
+    // The coast path from the Pasaia ferry is printed from 4:10. Measured from
+    // zero, the landing — where the line starts — was read as 2 km along it.
+    expect(metres("# Leg\n\n4:10 Turn R off the ferry.\n\n5:10 Along the coast.\n\n6:10 Arrive.")).toEqual([
+      0, 1500, 3000,
+    ]);
   });
 });
 

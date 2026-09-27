@@ -710,6 +710,13 @@ scaling the clock flat. And that is only the starting guess: the bracketed
 waypoints still pin what they touch, so the terrain carries the stretches
 nothing else anchors.
 
+The clock is counted from the file's first step, not from 0:00. A leg's notes
+start part-way through the printed day — day 3b, the coast path from the
+Pasaia ferry, begins at 4:10 — and measured from zero its first instruction,
+at the landing where the line starts, was read as 2 km along a 3 km test line.
+Every file that starts at 0:00 converts exactly as before, and all the
+existing ones do.
+
 **The ends of a day are anchors nobody writes down.** Outside the outermost
 bracketed waypoint there is nothing to say what a printed hour is worth, so
 the last instruction extrapolates on the scale of whatever stretch came
