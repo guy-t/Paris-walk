@@ -83,10 +83,25 @@ export interface ProcessedTrack {
  * own pace rather than Tobler's 5.04 km/h.
  *
  * The original is 6·exp(−3.5·|slope + 0.1|) km/h, which peaks on a gentle
- * *descent* — walking downhill is faster than on the flat, up to a point. This
- * uses 0.05 rather than Tobler's 0.1 because the tracks here are steeper than
- * the alpine roads he fitted, and the floor of 0.15 m/s stops a cliff-edge
- * data spike predicting an infinite ETA.
+ * *descent* — walking downhill is faster than on the flat, up to a point. The
+ * floor of 0.15 m/s stops a cliff-edge data spike predicting an infinite ETA.
+ *
+ * The offset is 0.05 rather than Tobler's 0.1, and **it only affects descents**.
+ * Uphill it cancels outright: exp(−3.5·|s+k|)/exp(−3.5·k) is exp(−3.5·s) for
+ * every s >= 0, whatever k is — so this is pure Tobler on every climb, and an
+ * earlier comment claiming the 0.05 was for tracks steeper than his alpine
+ * roads cannot have been describing what it does. There is a test pinning that
+ * identity.
+ *
+ * What it does is halve the descent curve: 2.96 km/h at −20% where Tobler says
+ * 4.20, so a 25% descent is scored as slow as a 15% climb. That is deliberate
+ * and it is the owner's call, made on the hill with the numbers in front of
+ * him: Tobler fitted alpine roads, and on the loose rocky path these trips
+ * actually cross a steep descent is not walked at the flat pace. Descents are
+ * 21–60% of a day's predicted time, so this is worth 3–11% of a day — do not
+ * "restore" Tobler's 0.1 without asking, and note that `tobCum` is also what
+ * a time-only booklet's printed times are converted through, so changing it
+ * moves route notes (up to 675 m, measured).
  *
  * @param slope rise over run, so 0.1 is a 10% gradient
  * @param paceKmh the walker's pace on the flat, km/h
