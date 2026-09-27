@@ -10,6 +10,7 @@
  */
 
 import { simplify, type Point3 } from "./geo.js";
+import { fillElevations } from "./track.js";
 
 export interface Waypoint {
   name: string;
@@ -47,11 +48,19 @@ export function parseGPX(text: string, fallbackName = "Imported track"): ParsedG
   if (nodes.length < 2) nodes = [...doc.querySelectorAll("rte rtept")];
   if (nodes.length < 2) throw new Error("No track in this GPX");
 
-  const arr: Point3[] = nodes.map((p) => [
-    +(p.getAttribute("lat") ?? 0),
-    +(p.getAttribute("lon") ?? 0),
-    +(p.querySelector("ele")?.textContent || 0),
-  ]);
+  // A missing <ele> is null, not 0. Sea level is a real elevation, so coercing
+  // the two together put a cliff to the bottom of the sea in the profile — see
+  // `fillElevations`, which interpolates them from the readings either side.
+  const arr: Point3[] = fillElevations(
+    nodes.map((p) => {
+      const ele = p.querySelector("ele")?.textContent?.trim();
+      return [
+        +(p.getAttribute("lat") ?? 0),
+        +(p.getAttribute("lon") ?? 0),
+        ele ? +ele : null,
+      ] as const;
+    }),
+  );
 
   const wpts: Waypoint[] = [...doc.querySelectorAll("gpx > wpt")].map((w) => ({
     name: w.querySelector("name")?.textContent?.trim() || "",

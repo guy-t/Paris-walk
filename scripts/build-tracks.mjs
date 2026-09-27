@@ -36,7 +36,7 @@
 import { readFileSync, writeFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { simplify, haversine } from "../packages/core/dist/index.js";
+import { fillElevations, simplify, haversine } from "../packages/core/dist/index.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = join(root, "apps/web/src/hike/tracks.json");
@@ -146,7 +146,17 @@ function readTracks(xml, where) {
   const blocks = [...xml.matchAll(/<trk>([\s\S]*?)<\/trk>/g)];
   const tracks = blocks.map((t) => ({
     name: text(t[1], "name"),
-    pts: readPoints(t[1], "trkpt").map((p) => [p.lat, p.lon, +(text(p.body, "ele") || 0)]),
+    // A missing <ele> is null, not 0: the same `|| 0` that hid the self-closing
+    // tags above then reported the six elevation-less points at the start of
+    // day 4 of the Picos as sea level, and the day as climbing 1469 m when it
+    // climbs 371 m. `fillElevations` interpolates them along the line.
+    pts: fillElevations(
+      readPoints(t[1], "trkpt").map((p) => {
+        const ele = text(p.body, "ele");
+        return [p.lat, p.lon, ele === "" ? null : +ele];
+      }),
+    ),
+    noEle: readPoints(t[1], "trkpt").filter((p) => text(p.body, "ele") === "").length,
   }));
   const read = tracks.reduce((n, t) => n + t.pts.length, 0);
   const opened = count(xml, "trkpt");
@@ -399,6 +409,7 @@ for (const file of files) {
     spine: spine.name,
     roles,
     gaps,
+    noEle: tracks.reduce((n, t) => n + t.noEle, 0),
     used: new Set([...spurNames, ...Object.keys(wanted), ...Object.keys(endings)]),
   });
 }
@@ -428,6 +439,15 @@ if (process.argv.includes("--check")) {
         `  ${g.name.padEnd(54)} ${String(Math.round(g.max)).padStart(5)} m at ${(g.at / 1000).toFixed(2)} km`,
       );
     }
+  }
+
+  // Points that stated no elevation. Interpolated, not invented — but worth
+  // saying out loud, because a file that is mostly missing them has a profile
+  // worth doubting and every climb figure and ETA is read off that profile.
+  const noEle = report.filter((r) => r.noEle > 0);
+  if (noEle.length) {
+    console.log("\npoints with no <ele>, interpolated from the readings either side:");
+    for (const r of noEle) console.log(`  ${r.file.padEnd(46)} ${String(r.noEle).padStart(4)}`);
   }
 
   // Everything in the files that is not shipped, so a route nobody offered is

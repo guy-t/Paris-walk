@@ -149,3 +149,45 @@ describe("toGPX", () => {
     expect(pts[3]![0]).toBeCloseTo(43.101, 5); // attributes in the other order
   });
 });
+
+describe("parseGPX elevations", () => {
+  // A point with no elevation is written self-closing, which is how the app's
+  // own reader came to drop them. Read but coerced to 0, they put a cliff to
+  // sea level in the profile: the shipped day 4 of the Picos claimed 1469 m of
+  // climb against a real 371 m, on a walk that never drops below 886 m.
+  // Zigzagged in longitude on purpose: parseGPX simplifies, and a dead straight
+  // line of six points is two points afterwards, quite correctly.
+  const GAPPY = `<?xml version="1.0"?>
+<gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1">
+  <trk><name>Gappy</name><trkseg>
+    <trkpt lat="43.1210" lon="-4.7280"/>
+    <trkpt lat="43.1220" lon="-4.7270"/>
+    <trkpt lat="43.1230" lon="-4.7280"><ele>1100</ele></trkpt>
+    <trkpt lat="43.1240" lon="-4.7270"/>
+    <trkpt lat="43.1250" lon="-4.7280"><ele>1200</ele></trkpt>
+    <trkpt lat="43.1260" lon="-4.7270"/>
+  </trkseg></trk>
+</gpx>`;
+
+  it("interpolates a missing <ele> instead of calling it sea level", () => {
+    const { pts } = parseGPX(GAPPY);
+    expect(pts).toHaveLength(6);
+    expect(pts.every((p) => p[2] > 1000)).toBe(true);
+    // Between two readings: half way along, half way up.
+    expect(pts[3]![2]).toBeCloseTo(1150, 0);
+    // Outside them: held, because there is no second reading to slope towards.
+    expect(pts[0]![2]).toBe(1100);
+    expect(pts[1]![2]).toBe(1100);
+    expect(pts[5]![2]).toBe(1200);
+  });
+
+  it("still reads a stated zero as zero", () => {
+    // The coast path into San Sebastián genuinely reads 0 m, and eight of its
+    // points do. A missing reading and sea level are different facts.
+    const { pts } = parseGPX(
+      GAPPY.replace('<trkpt lat="43.1230" lon="-4.7280"><ele>1100</ele></trkpt>',
+        '<trkpt lat="43.1230" lon="-4.7280"><ele>0</ele></trkpt>'),
+    );
+    expect(pts[2]![2]).toBe(0);
+  });
+});

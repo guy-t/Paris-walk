@@ -464,6 +464,45 @@ counts the opening tags and refuses to build if it did not read that many.
 `parseGPX`, which is what the walker's own import goes through, uses the DOM
 and never had the bug; there is a test so it stays that way.
 
+**And reading that point was only half of it: it has no elevation, and `|| 0`
+is sea level.** Both readers did `+(ele || 0)`, so a missing reading and a
+genuine 0 m became the same number and the profile got a cliff to the bottom
+of the sea and back. **Day 4 of the Picos reported 1469 m of climb for a walk
+that climbs 371 m** — four times the headline figure on the dashboard, on a day
+that never drops below 886 m, because the six points at the start of its file
+state no elevation. Day 2 of the Basque coast has 53 such points, one of them
+mid-route, which invented 75 m of climb and 17 minutes of ETA; the Bera to
+Biriatou escape line was 3h55 against a real 3h37.
+
+`fillElevations` interpolates them along the line, holding the outermost
+reading flat rather than extrapolating a gradient out of nothing, and both
+`parseGPX` and the generator pass a missing `<ele>` through as `null` so it can
+tell. A genuine zero survives, which matters: the coast path into San Sebastián
+really does read 0 m and eight of its points do. The build prints how many it
+filled per file — 53, 122 and 10 — because a file mostly missing them has a
+profile worth doubting, and every climb figure, ETA and route-note position is
+read off that profile.
+
+**Uphill, Tobler's offset cancels — so the app's 0.05 only slows descents.**
+`exp(-3.5·|s+k|)/exp(-3.5·k)` is `exp(-3.5·s)` for every `s >= 0`, whatever `k`
+is, so the 0.05 used in place of Tobler's own 0.1 changes nothing at all about
+climbs; the comment saying it was for tracks steeper than his alpine roads
+cannot have been describing what it does. What it does is halve the descent
+curve: at −20% the app says 2.96 km/h where Tobler says 4.20, and a 25% descent
+is scored as slow as a 15% climb. Descents are 21–60% of each day's predicted
+time, so it is worth 3–11% of a day.
+
+Not changed, deliberately. The two booklet times on record cannot separate the
+two values — with elevations fixed, `k=0.05` gives day 1 +6% and day 4 +3%
+against On Foot's own walking times, `k=0.10` gives +3% and −5% — and `tobCum`
+is what `timesToDistances` converts a time-only booklet through, so raising it
+moves unanchored route notes by a mean of 141–252 m and up to 675 m. Bracketed
+waypoints still pin what they touch, but a note arriving several hundred metres
+early is a wrong instruction at a junction, which is worse than a pessimistic
+ETA. It wants measuring against a real booklet's timing points, per the rule
+above: measured, not reasoned about.
+
+
 **A day that forks is two hikes but one day.** The harder option ships as its
 own line, because one GPX document is one polyline to the map-matcher. Every
 piece of state a walker accumulates therefore hangs off `dayId(hike)` — the
