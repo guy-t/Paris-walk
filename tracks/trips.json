@@ -80,7 +80,27 @@
         "id": "7_Hondarribia_to_San_Sebastian_easier",
         "name": "Day 3 Hondarribia to San Sebastián (easier, off the ridge)"
       }
-    }
+    },
+    "legs": [
+      {
+        "id": "7_Hondarribia_to_Pasaia",
+        "name": "Day 3a Hondarribia to the Pasaia ferry (ridge + via ferrata)",
+        "to": "taxi drop off",
+        "variants": [
+          {
+            "id": "7_Hondarribia_to_Pasaia_no_ferrata",
+            "name": "Day 3a Hondarribia to the Pasaia ferry (down at [7], no via ferrata)",
+            "leave": "7b Option up to Ridge",
+            "join": "7a Easier route"
+          }
+        ]
+      },
+      {
+        "id": "7_Pasaia_to_San_Sebastian",
+        "name": "Day 3b Pasaia ferry to San Sebastián",
+        "from": "9"
+      }
+    ]
   },
 
   "_renames": {
