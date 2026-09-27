@@ -524,6 +524,47 @@ export function placeSteps(
  * Showing a step that is still ahead is honest as long as the caller says so,
  * which is why the cue reads "in 10 m" rather than implying you are there.
  */
+/**
+ * The instructions to show for one line of a day.
+ *
+ * A booklet prints a variant as its own section covering only the stretch
+ * that differs — the escape route off day 2 is three steps from waypoint [5]
+ * down to Biriatou — so filtering the notes to that variant leaves a walker
+ * with three instructions for a ten-kilometre day and nothing at all for the
+ * eight kilometres they share with the main route. That was true of day 1's
+ * harder option too: it carried the middle five kilometres and neither end.
+ *
+ * So a variant is shown as the main route's instructions outside its own
+ * span, plus its own inside it. Where the variant runs to the end of the line
+ * it is a finish rather than a detour — the walk stops somewhere else — and
+ * the main route's later steps are dropped rather than piled at the end.
+ */
+export function stepsForVariant(
+  steps: readonly PlacedStep[],
+  variant: string,
+  mainVariant: string,
+  trackLength: number,
+): PlacedStep[] {
+  if (variant === mainVariant) return steps.filter((s) => s.variant === mainVariant);
+  const mine = steps.filter((s) => s.variant === variant);
+  const placed = mine.filter((s): s is PlacedStep & { prog: number } => s.prog != null);
+  if (!placed.length) return mine;
+
+  const from = placed[0]!.prog;
+  const to = placed[placed.length - 1]!.prog;
+  // Within a couple of hundred metres of the end is the end: a spur finishes
+  // at a hotel door, not at the last track point.
+  const finishes = to >= trackLength - 200;
+
+  const shared = steps.filter(
+    (s) =>
+      s.variant === mainVariant &&
+      s.prog != null &&
+      (s.prog < from || (!finishes && s.prog > to)),
+  );
+  return [...shared, ...mine].sort((a, b) => (a.prog ?? 0) - (b.prog ?? 0));
+}
+
 export function stepAt(
   steps: readonly PlacedStep[],
   progress: number,

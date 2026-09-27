@@ -62,6 +62,12 @@
         "id": "6_Bera_to_Hondarribia_no_calvaire",
         "name": "Day 2 Bera to Hondarribia (avoiding Mont du Calvaire)"
       }
+    },
+    "endings": {
+      "6b Escape Route to Biriatou": {
+        "id": "6_Bera_to_Biriatou",
+        "name": "Day 2 Bera to Biriatou (escape at [5], taxi on)"
+      }
     }
   },
 

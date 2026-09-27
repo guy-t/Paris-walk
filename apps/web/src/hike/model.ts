@@ -242,17 +242,14 @@ export function waypointsAlong(track: ProcessedTrack, wpts: readonly Waypoint[])
 }
 
 /**
- * Which line of the day a set of notes' variant is walked on.
+ * Which line a notes variant is walked on, by position.
  *
- * By position, not by name: the variant ids come from the headings in the
- * file the walker imported (`## Harder option` becomes `harder-option`), and
- * the next day's notes may word it differently. The printed notes always give
- * the main route first and each alternative after it, which is the order
- * `library.family` returns, so the *n*th variant is the *n*th line.
- *
- * Null when the day has no line for that variant — notes with three sections
- * against a day that ships two. Those steps stay where they are rather than
- * being drawn onto a line they are not describing.
+ * **No longer used, and should not be wired back in.** The route pills pick a
+ * line by its own id now. Matching by position held only while a day printed
+ * one alternative and shipped one line: day 2 ships three lines against a
+ * booklet with two sections, and tapping "Escape to Biriatou" opened the Mont
+ * du Calvaire line — measured, with the distances then read off a 20 km line
+ * on a 10 km walk. Kept for the tests that record why.
  */
 export function lineForVariant(
   family: readonly Hike[],

@@ -17,6 +17,7 @@ import {
   project,
   records,
   stepAt,
+  stepsForVariant,
   store,
   storageReport,
   suggestProvider,
@@ -45,7 +46,6 @@ import {
   APP,
   dayId,
   library,
-  lineForVariant,
   loadSettings,
   PREFERRED_PROVIDERS,
   saveSettings,
@@ -409,10 +409,23 @@ export function App() {
     () => placeNotes(notes, state.track, state.hike?.wpts ?? []),
     [notes, state.track, state.hike],
   );
-  const cue = useMemo(
-    () => stepAt(noteSteps.filter((s) => s.variant === variant), state.progress),
-    [noteSteps, variant, state.progress],
+  /**
+   * The instructions for the line being walked: the main route's outside the
+   * variant's own stretch, and the variant's inside it. A booklet prints a
+   * variant as only the part that differs, so filtering to it alone leaves
+   * the shared kilometres with nothing on the screen.
+   */
+  const shown = useMemo(
+    () =>
+      stepsForVariant(
+        noteSteps,
+        variant,
+        notes?.variants[0]?.id ?? variant,
+        state.track?.length ?? 0,
+      ),
+    [noteSteps, variant, notes, state.track],
   );
+  const cue = useMemo(() => stepAt(shown, state.progress), [shown, state.progress]);
 
   /**
    * The instruction on the header, which is usually the walk's but need not be.
@@ -430,7 +443,6 @@ export function App() {
    * than one that is stuck.
    */
   const [heldStep, setHeldStep] = useState<number | null>(null);
-  const shown = useMemo(() => noteSteps.filter((s) => s.variant === variant), [noteSteps, variant]);
   const liveIndex = cue.current ? shown.indexOf(cue.current) : -1;
   useEffect(() => setHeldStep(null), [state.hike, variant]);
   useEffect(() => {
@@ -465,7 +477,7 @@ export function App() {
   const cueNext = shown[cueIndex + 1] ?? null;
   // The list in the sheet scrolls to whatever the header is showing, so the
   // arrows move both and the two never disagree about where the walker is.
-  const currentIndex = cueStep ? noteSteps.indexOf(cueStep) : -1;
+  const currentIndex = cueStep ? shown.indexOf(cueStep) : -1;
 
   // The next-waypoint row is what the dashboard had before there was a cue.
   // With one on screen it is a second answer to the same question, one row
@@ -573,41 +585,25 @@ export function App() {
   );
 
   /**
-   * Choose which line of the day the walker is on.
+   * Which set of instructions to follow — and only that.
    *
-   * Both a notes choice and a route change. A day that forks ships as two
-   * hikes — one GPX document is one line to the map-matcher — so the pill in
-   * the Route notes tab has to open the other one. The notes, the choice and
-   * the session all hang off the day, so nothing is re-imported and nothing
-   * recorded is lost — and `openHike` sees that this is a swap rather than a
-   * resume, so the tracker finds the walker on the new line instead of
-   * trusting a distance measured along the old one.
+   * It used to swap the *line* as well, matching a notes variant to a line by
+   * position: variant index 1 opens family line 1. That worked while a day
+   * had one alternative printed and one line shipped, and breaks as soon as
+   * the two lists differ. Day 2 ships three lines and its booklet prints two
+   * sections, so tapping "Escape to Biriatou" opened the Mont du Calvaire
+   * line — measured, with the distances then read off a 20 km line on a
+   * 10 km walk.
    *
-   * A day with no separate line for that variant (notes with three sections,
-   * a day that ships two) just changes which instructions are shown, which is
-   * what this did before there was a second line at all.
+   * The line is chosen by its own pills now, by identity rather than by
+   * position. Two questions, two rows, neither guessing at the other.
    */
   const chooseVariant = useCallback(
     (id: string) => {
       setVariant(id);
       if (day) saveVariant(day, id);
-      const current = state.hike;
-      if (!current || !notes) return;
-      const line = lineForVariant(
-        library.family(current.id),
-        notes.variants.map((v) => v.id),
-        id,
-      );
-      if (!line || line === current.id) return;
-      const opened = hike.openHike(line);
-      if (!opened) return;
-      setFitNonce((n) => n + 1);
-      show(`Now on ${opened.hike.name}.`);
-      if (!store.get(`hike:sights:${line}`) && navigator.onLine) {
-        void hike.loadSights(opened.hike, opened.track);
-      }
     },
-    [day, notes, state.hike, hike, show],
+    [day],
   );
 
   // The pace the ETA has settled on, so the forecast and the arrival time on
@@ -1044,7 +1040,10 @@ export function App() {
         }}
         notes={{
           notes,
-          steps: noteSteps,
+          // The merged list, not every step in the file: the panel and the
+          // cue must be reading the same instructions or the swipe indexes
+          // into one and highlights the other.
+          steps: shown,
           progress: state.progress,
           currentIndex,
           fmt,

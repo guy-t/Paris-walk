@@ -655,6 +655,29 @@ identical residuals either way, 17 m worst and 2 m mean over nine anchored
 steps, with only the first instruction moving, from 10 m along to the door it
 is written from.
 
+**A day can end somewhere else.** `endings` in `trips.json` makes a spur that
+leaves the route into a line of its own: the spine as far as the spur, then
+the spur. Day 2's escape route leaves at waypoint `[5]` and finishes in
+Biriatou, and the line is 10.32 km against the booklet's "From Bera: 10½km",
+ending 5 m from Les Jardins de Bakea.
+
+Orientation here is decided by *which end touches the route*, not by
+`classify`'s before-or-after, which is the right question for a hotel spur and
+the wrong one for this: the escape leaves at 8 km of 20, so it read as a spur
+walked *before* the day, came out reversed, and ended back at waypoint `[5]`
+with a 1681 m line drawn across country to get there. The gap report is what
+showed it.
+
+**A variant's notes cover only the stretch that differs**, so filtering the
+notes to a variant leaves the shared kilometres blank — three instructions for
+a ten-kilometre day on the escape route, and on day 1's harder option the
+middle five kilometres and neither end. `stepsForVariant` shows the main
+route's instructions outside the variant's own span and the variant's inside
+it; where the variant runs to the end of the line it is a finish rather than a
+detour, so the main route's later steps are dropped rather than piled at the
+end. Measured on the escape line: six instructions, the first three shared,
+then `[5]` at 8.1 km, `[A]` at 9.9 km and Biriatou at 10.3 km.
+
 **The route pills come from the library, not from the notes.** They used to
 be built from the `## ` headings in the imported file and matched to a line
 *by position*, which meant they appeared only once notes had been typed up,
@@ -669,7 +692,15 @@ built app: one tap switches, and the session survives it — 2440 m walked,
 
 The notes' own variant pills are still there for a booklet that prints more
 variants than the library has lines, and hidden when the two agree so a day
-never shows two rows of pills saying the same thing.
+never shows two rows of pills saying the same thing. They choose **which
+instructions to follow and nothing else**. They used to swap the line too, by
+matching a notes variant to a line *by position* — which worked while a day
+printed one alternative and shipped one line, and broke the moment the two
+lists differed: day 2 ships three lines against a booklet with two sections,
+so tapping "Escape to Biriatou" opened the Mont du Calvaire line, with the
+distances then read off a 20 km line on a 10 km walk. Two questions, two rows,
+neither guessing at the other. `lineForVariant` is kept only for the tests
+that record why.
 
 **A cue read off the distance walked needs a manual override.** `stepAt`
 picks the last instruction at or behind the walker, which is right until the
