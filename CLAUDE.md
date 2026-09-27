@@ -492,15 +492,25 @@ curve: at −20% the app says 2.96 km/h where Tobler says 4.20, and a 25% descen
 is scored as slow as a 15% climb. Descents are 21–60% of each day's predicted
 time, so it is worth 3–11% of a day.
 
-Not changed, deliberately. The two booklet times on record cannot separate the
-two values — with elevations fixed, `k=0.05` gives day 1 +6% and day 4 +3%
-against On Foot's own walking times, `k=0.10` gives +3% and −5% — and `tobCum`
-is what `timesToDistances` converts a time-only booklet through, so raising it
-moves unanchored route notes by a mean of 141–252 m and up to 675 m. Bracketed
-waypoints still pin what they touch, but a note arriving several hundred metres
-early is a wrong instruction at a junction, which is worse than a pessimistic
-ETA. It wants measuring against a real booklet's timing points, per the rule
-above: measured, not reasoned about.
+**0.05 stays, and the reason is the ground.** Put to the owner on the hill,
+with the numbers above: *"Leave as .05, a lot of rough paths here too."* Tobler
+fitted his curve to alpine roads, where a 20% descent really is walked at
+something near the flat pace. On loose and rocky path it is not, and the
+walker's own knees are the measurement that settles it. So the 0.05 is correct
+after all — for the ground, not for the reason the old comment gave. Do not
+raise it to Tobler's 0.1 on the strength of the algebra; the algebra only says
+the *old justification* was wrong, not the value.
+
+Two further reasons not to reopen it lightly. The two booklet times on record
+cannot separate the values anyway — with elevations fixed, `k=0.05` gives day 1
++6% and day 4 +3% against On Foot's own walking times, `k=0.10` gives +3% and
+−5%. And `tobCum` is what `timesToDistances` converts a time-only booklet
+through, so raising it moves unanchored route notes by a mean of 141–252 m and
+up to 675 m. Bracketed waypoints still pin what they touch, but a note arriving
+several hundred metres early is a wrong instruction at a junction, which is
+worse by far than a pessimistic ETA. If a trip on genuinely good path ever wants
+a different curve, it belongs per-trip beside the other things `trips.json`
+holds — not as a new global default.
 
 
 **A day that forks is two hikes but one day.** The harder option ships as its
