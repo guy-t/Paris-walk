@@ -320,6 +320,24 @@ new one, because stored settings win over `DEFAULT_SETTINGS` and the change
 would otherwise reach nobody who had ever opened the settings panel; a pace
 deliberately set to anything else is left alone.
 
+**And for a while it could not be changed.** Reported from the hill: "I can't
+change the AVG walking speed from 4, I can change to any fraction of 4 but not
+to 3." The row was `set("pace", +e.target.value || DEFAULT_SETTINGS.pace)`,
+which reads harmlessly and makes the field impossible to clear: `+"" === 0`,
+which is falsy, so deleting the last digit put the default straight back and
+React redrew it under the cursor. Measured on the built app, backspacing 4.2
+away gave `4`, `4`, `4.2`, `4` — and then typing 3 gave **4.3**, which is the
+report word for word. The off-track field shared the idiom and was worse:
+clearing it restored `50`, so typing 80 set the threshold to **5080**.
+
+A number a walker types passes through states that are not a number, so the
+field owns the text and the settings own the number (`NumberInput`). Only a
+finite parse is committed, clamped — a number input's `min` and `max` are not
+enforced while typing and never were, so 99 km/h went in — and blur writes the
+committed number back, so an abandoned `4.` does not sit there looking like a
+value. The pace step was 0.5 against a 4.2 default, which put the default off
+its own spinner's grid; it is 0.1.
+
 **Route notes never enter this repository.** They are the walking company's
 words — a personal copy of a copyrighted document, with the host's mobile
 number in it. They are imported from a file on the phone, kept in that

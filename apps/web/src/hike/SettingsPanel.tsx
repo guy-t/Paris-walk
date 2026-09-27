@@ -6,7 +6,7 @@
 
 import { providersFor, store, type AnyPoint } from "@slownav/core";
 import { useMemo, useState } from "react";
-import { DEFAULT_SETTINGS, type HikeSettings } from "./model.js";
+import { type HikeSettings } from "./model.js";
 import { backgroundTrackingAvailable } from "../shared/geolocation.js";
 import { requestStepCounter, stepCounterPresent } from "../shared/steps.js";
 
@@ -17,6 +17,54 @@ export interface SettingsPanelProps {
   /** A point on the current route, used to say which maps reach it. */
   /** The open route, so the picker can say which maps reach all of it. */
   near?: AnyPoint | readonly AnyPoint[] | null;
+}
+
+/**
+ * A number the walker types — which means it passes through states that are
+ * not a number, and one of those is empty.
+ *
+ * `set("pace", +e.target.value || DEFAULT_SETTINGS.pace)` read harmlessly and
+ * made the field impossible to change: `+"" === 0`, which is falsy, so
+ * deleting the last digit put the default straight back and React redrew it
+ * under the cursor. You could append to the 4 and get 4.5, but never clear it
+ * to type 3. Reported from the hill in exactly those words.
+ *
+ * So the field owns the text and the settings own the number. What was typed
+ * stays on screen; only a finite parse is committed, clamped, because a number
+ * input's `min` and `max` are not enforced while typing and never were;
+ * leaving the field writes the committed number back, so an abandoned "4." or
+ * an empty box does not sit there looking like a value.
+ */
+function NumberInput({
+  value,
+  min,
+  max,
+  step,
+  onCommit,
+}: {
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  onCommit: (n: number) => void;
+}) {
+  const [text, setText] = useState(() => String(value));
+  return (
+    <input
+      type="number"
+      inputMode="decimal"
+      min={min}
+      max={max}
+      step={step}
+      value={text}
+      onChange={(e) => {
+        setText(e.target.value);
+        const n = parseFloat(e.target.value);
+        if (Number.isFinite(n)) onCommit(Math.min(max, Math.max(min, n)));
+      }}
+      onBlur={() => setText(String(value))}
+    />
+  );
 }
 
 export function SettingsPanel({ settings, onSave, onClose, near }: SettingsPanelProps) {
@@ -134,13 +182,12 @@ export function SettingsPanel({ settings, onSave, onClose, near }: SettingsPanel
 
         <label>
           Pace on the flat (km/h)
-          <input
-            type="number"
+          <NumberInput
             min={2}
             max={8}
-            step={0.5}
+            step={0.1}
             value={draft.pace}
-            onChange={(e) => set("pace", +e.target.value || DEFAULT_SETTINGS.pace)}
+            onCommit={(n) => set("pace", n)}
           />
         </label>
         <p className="hint">
@@ -150,13 +197,12 @@ export function SettingsPanel({ settings, onSave, onClose, near }: SettingsPanel
 
         <label>
           Off-track warning (m)
-          <input
-            type="number"
+          <NumberInput
             min={15}
             max={300}
             step={5}
             value={draft.off}
-            onChange={(e) => set("off", +e.target.value || DEFAULT_SETTINGS.off)}
+            onCommit={(n) => set("off", n)}
           />
         </label>
         <p className="hint">
