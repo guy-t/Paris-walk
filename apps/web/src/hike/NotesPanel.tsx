@@ -118,7 +118,10 @@ export function NotesPanel({
     );
   }
 
-  const shown = steps.filter((s) => s.variant === variant);
+  // Already the right list: the caller merges the main route's instructions
+  // with the variant's, because a booklet prints a variant as only the part
+  // that differs. Filtering again here would throw the shared kilometres away.
+  const shown = steps;
 
   return (
     <div className="notes">

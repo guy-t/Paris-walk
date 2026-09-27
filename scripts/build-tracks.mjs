@@ -291,6 +291,27 @@ for (const file of files) {
   const before = spurs.filter((s) => s.kind === "onto").flatMap((s) => s.pts);
   const after = spurs.filter((s) => s.kind === "off").flatMap((s) => s.pts);
 
+  /**
+   * A day that ends early somewhere else.
+   *
+   * Not a variant of the walk but a truncation of it: the escape route off
+   * day 2 leaves the line at waypoint [5] and finishes in Biriatou, two
+   * kilometres down and a taxi from there. So the line is the spine as far as
+   * the spur, then the spur — and it ends where the walker actually stops,
+   * which is what makes the distance, the climb and the ETA mean anything.
+   */
+  const endings = spec.endings ?? {};
+  for (const n of Object.keys(endings)) {
+    const r = roles.find((x) => x.track.name === n);
+    if (!r) throw new Error(`tracks/${file}: no sub-track named "${n}" to finish on`);
+    if (r.kind === "option" || r.kind === "detached") {
+      throw new Error(
+        `tracks/${file}: "${n}" is ${r.kind === "option" ? "an option that rejoins the route" : "detached"}, ` +
+          `not a way off it, so it cannot be an early finish.`,
+      );
+    }
+  }
+
   const wanted = spec.variants ?? {};
   for (const n of Object.keys(wanted)) {
     const r = roles.find((x) => x.track.name === n);
@@ -312,6 +333,25 @@ for (const file of files) {
         name: v.name,
         variantOf: spec.id,
         pts: [...before, ...splice(spine.pts, r.track.pts, r), ...after],
+      };
+    }),
+    ...Object.entries(endings).map(([n, v]) => {
+      const r = roles.find((x) => x.track.name === n);
+      // Oriented by which *end* touches the route, not by what `classify`
+      // called it: an early finish leaves the line and keeps going, so the
+      // on-route end comes first however the file drew it. `classify` decides
+      // before-or-after from where along the spine a spur attaches, which is
+      // the right question for a hotel and the wrong one here — the escape
+      // route leaves at 8 km of 20, so it read as a spur walked *before* the
+      // day and came out reversed, ending back at waypoint [5] with a 1681 m
+      // line drawn across country to get there.
+      const away = r.a.dist <= JOIN_M ? r.track.pts : [...r.track.pts].reverse();
+      // No `after` spur either: the walk does not reach the hotel this day.
+      return {
+        id: v.id,
+        name: v.name,
+        variantOf: spec.id,
+        pts: [...before, ...spine.pts.slice(0, r.at + 1), ...away],
       };
     }),
   ];
@@ -359,7 +399,7 @@ for (const file of files) {
     spine: spine.name,
     roles,
     gaps,
-    used: new Set([...spurNames, ...Object.keys(wanted)]),
+    used: new Set([...spurNames, ...Object.keys(wanted), ...Object.keys(endings)]),
   });
 }
 
