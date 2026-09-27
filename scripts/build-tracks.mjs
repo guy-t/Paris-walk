@@ -234,6 +234,63 @@ const splice = (spine, opt, at) => [
 ];
 
 /**
+ * The spine, leaving it for a connector and crossing onto an option part-way.
+ *
+ * Day 3's via ferrata is the ridge's last stretch before Pasaia, and the file
+ * carries the way round it as two pieces: a 0.43 km path from the ridge at
+ * waypoint [7] down to [B], and the easier route, which it meets there and
+ * which rejoins the ridge at [8]. Neither piece alone is a line — the path is
+ * a spur on the spine and the easier route is an option that leaves it much
+ * earlier — so a walker who takes the ridge and drops off before the via
+ * ferrata had no line to follow. This is the ridge as far as the connector,
+ * the connector, the option from wherever the connector meets it, and the
+ * spine again from where the option rejoins.
+ */
+function crossover(spine, connector, option, where) {
+  const c = classify(spine, connector.pts);
+  if (c.kind === "option" || c.kind === "detached") {
+    throw new Error(`${where}: "${connector.name}" must touch the route at one end only to leave it`);
+  }
+  const o = classify(spine, option.pts);
+  if (o.kind !== "option") throw new Error(`${where}: "${option.name}" does not rejoin the route`);
+  // Walked away from the spine, however the file drew it.
+  const away = c.a.dist <= JOIN_M ? connector.pts : [...connector.pts].reverse();
+  const opt = o.from <= o.to ? option.pts : [...option.pts].reverse();
+  const join = nearest(opt, away[away.length - 1]);
+  if (join.dist > JOIN_M) {
+    throw new Error(`${where}: "${connector.name}" ends ${Math.round(join.dist)} m from "${option.name}"`);
+  }
+  const leave = c.at;
+  const rejoin = Math.max(o.from, o.to);
+  if (rejoin <= leave) throw new Error(`${where}: "${option.name}" rejoins before "${connector.name}" leaves`);
+  return [...spine.slice(0, leave + 1), ...away, ...opt.slice(join.idx), ...spine.slice(rejoin + 1)];
+}
+
+/**
+ * A line cut to the stretch between two waypoints, either end optional.
+ *
+ * A day can be two walks: the ridge to the Pasaia ferry, a crossing nobody
+ * walks, and the coast path into San Sebastián — which a walker may do on a
+ * bus instead. Walking it as one line counts the boat as distance and puts
+ * the second half's ETA on top of the first. So a leg is the day's composed
+ * line cut at the waypoint nearest each end, and it is its own day in the
+ * library: its own session, its own notes, its own finish.
+ */
+function clip(pts, wpts, from, to, where) {
+  const at = (name) => {
+    const w = wpts.find((x) => x.name === name);
+    if (!w) throw new Error(`${where}: no waypoint "${name}" to cut the line at`);
+    const n = nearest(pts, [w.lat, w.lon]);
+    if (n.dist > JOIN_M * 4) throw new Error(`${where}: waypoint "${name}" is ${Math.round(n.dist)} m off the line`);
+    return n.idx;
+  };
+  const a = from == null ? 0 : at(from);
+  const b = to == null ? pts.length - 1 : at(to);
+  if (b <= a) throw new Error(`${where}: "${to}" comes before "${from}" on the line`);
+  return pts.slice(a, b + 1);
+}
+
+/**
  * Which of a day's lines each waypoint belongs to.
  *
  * Nearest wins, and "about as near to both" means both — which is what a
@@ -367,7 +424,28 @@ for (const file of files) {
   ];
 
   const drop = new Set(spec.drop ?? []);
-  const wpts = readWaypoints(xml, renames, `tracks/${file}`).filter((w) => w.name && !drop.has(w.name));
+  const allWpts = readWaypoints(xml, renames, `tracks/${file}`).filter((w) => w.name);
+  const wpts = allWpts.filter((w) => !drop.has(w.name));
+
+  // Legs: the day cut into walks of their own, each with its own options. A
+  // leg's main line is the day's main line cut to it; an option that crosses
+  // over is composed on the whole day first and cut the same way, so both
+  // end at the same pontoon rather than wherever each happened to stop.
+  const byName = (n) => {
+    const t = others.find((x) => x.name === n);
+    if (!t) throw new Error(`tracks/${file}: no sub-track named "${n}"`);
+    return t;
+  };
+  const whole = lines[0].pts;
+  for (const leg of spec.legs ?? []) {
+    const where = `tracks/${file} leg ${leg.id}`;
+    lines.push({ id: leg.id, name: leg.name, pts: clip(whole, allWpts, leg.from, leg.to, where) });
+    for (const v of leg.variants ?? []) {
+      const crossed = [...before, ...crossover(spine.pts, byName(v.leave), byName(v.join), where), ...after];
+      lines.push({ id: v.id, name: v.name, variantOf: leg.id, pts: clip(crossed, allWpts, leg.from, leg.to, where) });
+    }
+  }
+
   const mine = assign(lines, wpts);
 
   lines.forEach((l, i) => {
@@ -410,7 +488,12 @@ for (const file of files) {
     roles,
     gaps,
     noEle: tracks.reduce((n, t) => n + t.noEle, 0),
-    used: new Set([...spurNames, ...Object.keys(wanted), ...Object.keys(endings)]),
+    used: new Set([
+      ...spurNames,
+      ...Object.keys(wanted),
+      ...Object.keys(endings),
+      ...(spec.legs ?? []).flatMap((l) => (l.variants ?? []).flatMap((v) => [v.leave, v.join])),
+    ]),
   });
 }
 

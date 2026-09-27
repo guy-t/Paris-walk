@@ -735,6 +735,32 @@ walked *before* the day, came out reversed, and ended back at waypoint `[5]`
 with a 1681 m line drawn across country to get there. The gap report is what
 showed it.
 
+**A day can be two walks** (`legs` in `trips.json`). Day 3 of the Basque coast
+is the Jaizkibel ridge to the Pasaia ferry, a boat nobody walks, then 8 km of
+coast path into San Sebastián that the walker may well do by bus. As one line
+the boat counts as distance and the second half's ETA sits on top of the
+first. A leg is the day's composed line cut at the waypoint nearest each end
+(`from` / `to`), and it is a day of its own in the library: its own session,
+notes and finish. Day 3a ends 0 m from the Pasai Donibane pontoon (the
+`taxi drop off` waypoint), 15.26 km; day 3b starts 0 m from the San Pedro
+landing at `[9]` and ends 6 m from Legazpi Doce Rooms, 8.32 km. The full-day
+lines are kept beside them.
+
+**A way off the ridge can cross onto another option** (a leg's `variants`,
+each naming the connector it `leave`s by and the option it `join`s). The file
+carries the way round day 3's via ferrata as two pieces — a 0.43 km path from
+the ridge at `[7]` down to `[B]`, and the easier route, which it meets there
+and which rejoins the ridge at `[8]` — and neither is a line alone: the path is
+a spur and the easier route leaves the spine eight kilometres earlier.
+`crossover` walks the spine to the connector, the connector away from it, the
+option from wherever the connector meets it, and the spine again from where
+the option rejoins, refusing if the connector ends more than 25 m from the
+option. Measured: 0 of 63 points sampled along the via ferrata are within
+30 m of the crossed line, against 52 on the ridge line, and the largest step
+anywhere on it (170 m) is one the easier route already had. It costs 0.38 km
+and about five minutes, so it is a choice to make at `[7]` rather than at the
+hotel.
+
 **A variant's notes cover only the stretch that differs**, so filtering the
 notes to a variant leaves the shared kilometres blank — three instructions for
 a ten-kilometre day on the escape route, and on day 1's harder option the
@@ -944,6 +970,8 @@ done by hand once — the settings API needs repo-admin rights the default
   from the `option` / `onto` / `off` classification the build already derives,
   with a row of pills per choice rather than a row of line names. The hotel is
   a trip-level setting, not a line: chosen once, composed onto every day.
+  `legs` and `crossover` are the first two pieces of that, applied by hand to
+  one day; they still enumerate lines rather than composing at open time.
 - Canal and walk ports.
 - **The first 675 m of day 1 are extrapolated**, backwards from waypoint
   `1`, because nothing in Potes anchors: `Casa Cayo` is named mid-sentence
