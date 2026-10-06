@@ -81,6 +81,18 @@ real URL only once that app has been walked with.
 When porting the remaining two, read the original HTML first — it is the
 specification, and its constants were tuned against real journeys.
 
+**The walk is being used again, in Amsterdam, as the original file.** Fixes go
+into `pariswalk.html` itself, which is not the same thing as starting the port.
+Two things it learned there. A planner stop has no OSM tags to follow, so its
+details are found by name among the Wikipedia articles near the pin
+(`wikiForPlace`), with a name search kept only if the article it finds is close
+by; the match is shown in the planner so a stop that geocoded to the wrong
+place says so before the walk is built. Every summary is cached per walk, and a
+lookup that failed for want of signal is never remembered as "no article". And
+a loop's first GPS fix was searched against the whole route, so a walker at
+the door matched the finish, metres away, and the walk read as done — the same
+fault as the hike's circuit, fixed the same way: `startGPS` anchors the tracker.
+
 **The two ports are still parked.** They were parked for the Picos week,
 which is done; they stay parked because the hike app is the one being walked
 with and the next trip is the Basque coast. Do not start a port without being

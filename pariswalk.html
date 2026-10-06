@@ -90,6 +90,7 @@
   .dir-item.sight .text .main { font-weight: 600; font-size: 14px; color: #92400e; }
   .dir-item.sight .dist { font-size: 13px; font-weight: 600; color: #92400e; }
   .dir-item .text .sub { font-size: 12px; color: var(--muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dir-item .text .sub.wrap { white-space: normal; }
   .dir-item .dist { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 18px; text-align: right; white-space: nowrap; }
   .dir-item:not(.primary) .dist { font-size: 13px; font-weight: 600; color: var(--muted); }
   .dir-empty { padding: 18px 14px; color: var(--muted); font-size: 14px; }
@@ -128,6 +129,13 @@
   .you-marker { width: 18px; height: 18px; border-radius: 50%; background: #2563eb; border: 3px solid #fff; box-shadow: 0 0 0 2px rgba(37,99,235,.45), 0 2px 6px rgba(0,0,0,.35); }
   .wp-marker { width: 22px; height: 22px; border-radius: 50%; background: #1f2937; color: #fff; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.4); font-size: 11px; font-weight: 700; display: grid; place-items: center; }
   .wp-marker.done { background: #9ca3af; }
+  .wp-marker.start { background: #15803d; }
+  .route-arrow { width: 16px; height: 16px; display: grid; place-items: center; border-radius: 50%; background: #2563eb; box-shadow: 0 0 0 1.5px #fff; }
+  .route-arrow svg { width: 12px; height: 12px; fill: none; stroke: #fff; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+  .pop { font-size: 13px; line-height: 1.4; }
+  .pop img { float: right; width: 64px; height: 64px; object-fit: cover; border-radius: 6px; margin: 0 0 4px 8px; }
+  .pop .pop-sub { color: #6b6b66; }
+  .pop p { margin: 6px 0 0; clear: none; }
   .poi-marker { width: 12px; height: 12px; border-radius: 50%; background: #d97706; border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,.4); }
   .leaflet-popup-content { margin: 10px 12px; font-size: 13px; line-height: 1.35; }
   .leaflet-popup-content b { font-size: 14px; }
@@ -154,6 +162,8 @@
   .poi-head .name { font-weight: 600; font-size: 14px; flex: 1; }
   .poi-head .kind { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
   .poi-head .dist { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .poi-snip { margin-top: 3px; font-size: 12px; line-height: 1.4; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; cursor: pointer; }
+  .poi.open .poi-snip { display: none; }
   .poi-body { display: none; margin-top: 8px; font-size: 13px; line-height: 1.45; color: #374151; }
   .poi.open .poi-body { display: block; }
   .poi-body .fact { margin: 0 0 6px; }
@@ -197,6 +207,8 @@
   .plan-stop .name { font-weight: 600; }
   .plan-stop .where { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .plan-stop .ctl { display: flex; gap: 2px; }
+  .plan-stop .wiki { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 12px; line-height: 1.35; color: #374151; margin-top: 2px; }
+  .plan-stop .wiki.none { color: var(--muted); font-style: italic; }
   .plan-stop .ctl button { padding: 3px 7px; font-size: 12px; border-radius: 7px; }
   .plan-marker { width: 24px; height: 24px; border-radius: 50%; background: #15803d; color: #fff; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.4); font-size: 11px; font-weight: 700; display: grid; place-items: center; }
   .plan-marker.start { background: #1d4ed8; }
@@ -732,42 +744,158 @@ function poiKind(t) {
   if (t.amenity) return t.amenity;
   return t.tourism || "sight";
 }
+/* A Wikipedia request. Not found is null; anything else that goes wrong throws, so a lookup made
+   with no signal is retried later rather than remembered as "no article". */
+async function wget(url) {
+  const r = await fetch(url);
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error(`Wikipedia ${r.status}`);
+  return r.json();
+}
+async function wikiPage(lang, title) {
+  const j = await wget(`https://${lang}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title.replace(/ /g, "_"))}`);
+  if (!j || !j.extract || j.type === "disambiguation") return null;
+  return { title: j.title, extract: j.extract, thumb: j.thumbnail?.source, url: j.content_urls?.desktop?.page || j.content_urls?.mobile?.page, lang };
+}
+/* The English article for an OSM object's wikipedia / wikidata tags, else the original language's. */
 async function wikiSummary(tags) {
-  const summary = async (lang, title) => {
-    const r = await fetch(`https://${lang}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title.replace(/ /g, "_"))}`);
-    if (!r.ok) return null;
-    const j = await r.json();
-    if (!j.extract) return null;
-    return { extract: j.extract, thumb: j.thumbnail?.source, url: j.content_urls?.desktop?.page || j.content_urls?.mobile?.page, lang };
-  };
-  const tryEn = async title => { try { return await summary("en", title); } catch { return null; } };
   // 1. explicit English article
-  if (tags["wikipedia:en"]) { const s = await tryEn(tags["wikipedia:en"]); if (s) return s; }
+  if (tags["wikipedia:en"]) { const s = await wikiPage("en", tags["wikipedia:en"]); if (s) return s; }
   // 2. the wikipedia tag (usually fr:Title) — find the English equivalent through its language links
   let lang = null, title = null;
   if (tags.wikipedia) { const m = tags.wikipedia.match(/^(\w+):(.+)$/); if (m) { lang = m[1]; title = m[2]; } else { lang = "en"; title = tags.wikipedia; } }
-  if (title && lang === "en") { const s = await tryEn(title); if (s) return s; }
+  if (title && lang === "en") { const s = await wikiPage("en", title); if (s) return s; }
   if (title && lang !== "en") {
-    try {
-      const r = await fetch(`https://${lang}.wikipedia.org/w/api.php?action=query&prop=langlinks&lllang=en&redirects=1&format=json&origin=*&titles=${encodeURIComponent(title)}`);
-      const j = r.ok ? await r.json() : null;
-      const en = Object.values(j?.query?.pages || {})[0]?.langlinks?.[0]?.["*"];
-      if (en) { const s = await tryEn(en); if (s) return s; }
-    } catch { }
+    const j = await wget(`https://${lang}.wikipedia.org/w/api.php?action=query&prop=langlinks&lllang=en&redirects=1&format=json&origin=*&titles=${encodeURIComponent(title)}`);
+    const en = Object.values(j?.query?.pages || {})[0]?.langlinks?.[0]?.["*"];
+    if (en) { const s = await wikiPage("en", en); if (s) return s; }
   }
   // 3. Wikidata sitelinks → English article
   if (tags.wikidata) {
-    try {
-      const r = await fetch(`https://www.wikidata.org/w/api.php?action=wbgetentities&ids=${encodeURIComponent(tags.wikidata)}&props=sitelinks&format=json&origin=*`);
-      const ent = r.ok ? Object.values((await r.json()).entities || {})[0] : null;
-      const sl = ent?.sitelinks || {};
-      if (sl.enwiki) { const s = await tryEn(sl.enwiki.title); if (s) return s; }
-      if (!title && sl.frwiki) { lang = "fr"; title = sl.frwiki.title; }
-    } catch { }
+    const j = await wget(`https://www.wikidata.org/w/api.php?action=wbgetentities&ids=${encodeURIComponent(tags.wikidata)}&props=sitelinks&format=json&origin=*`);
+    const sl = Object.values(j?.entities || {})[0]?.sitelinks || {};
+    if (sl.enwiki) { const s = await wikiPage("en", sl.enwiki.title); if (s) return s; }
+    if (!title) { const k = Object.keys(sl).find(k => /^[a-z]{2,3}wiki$/.test(k)); if (k) { lang = k.slice(0, -4); title = sl[k].title; } }
   }
   // 4. no English article: fall back to the original language
-  if (title && lang) { try { return await summary(lang, title); } catch { return null; } }
+  if (title && lang) return wikiPage(lang, title);
   return null;
+}
+
+/* A place with no tags to follow — a stop typed into the planner, a sight OSM never linked — is found
+   by name among the articles near it. Nearness does most of the work: "Westerkerk" has one article
+   within a kilometre of the Westerkerk, whatever else the name could mean elsewhere. */
+const WIKI_STOP = new Set(["the", "of", "and", "a", "an", "de", "het", "la", "le", "les", "du", "des", "van", "der", "den", "di", "del", "della", "el", "los", "las", "l", "d"]);
+function nameTokens(s) {
+  return String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
+    .replace(/['’`]s\b/g, "").replace(/[^a-z0-9]+/g, " ").trim().split(" ")
+    .filter(t => t && !WIKI_STOP.has(t))
+    .map(t => t === "st" || t === "sainte" || t === "sankt" || t === "san" ? "saint" : t.length > 3 && t.endsWith("s") ? t.slice(0, -1) : t);
+}
+/* How well an article title names a place, 0–1. The city is not a distinguishing word ("Royal Palace
+   of Amsterdam" is the Royal Palace), and a disambiguating suffix that is not the city costs a little. */
+function titleScore(name, title, city = "") {
+  const cityT = new Set(nameTokens(city));
+  const m = title.match(/^(.*?)(?:\s*\((.*)\)|,\s*(.*))$/);
+  const core = m ? m[1] : title, suffix = m ? (m[2] || m[3] || "") : "";
+  const nt = nameTokens(name).filter(t => !cityT.has(t)), tt = nameTokens(core).filter(t => !cityT.has(t));
+  if (!nt.length || !tt.length) return 0;
+  const tset = new Set(tt), hit = nt.filter(t => tset.has(t)).length;
+  let sc = hit / Math.max(nt.length, tt.length);
+  if (suffix && nameTokens(suffix).some(t => !cityT.has(t))) sc *= 0.7; // "Fountain (Duchamp)" is not any fountain
+  return sc;
+}
+async function wikiNear(lat, lon, radius = 1000, limit = 100) {
+  const j = await wget(`https://en.wikipedia.org/w/api.php?action=query&list=geosearch&gscoord=${lat.toFixed(5)}|${lon.toFixed(5)}&gsradius=${radius}&gslimit=${limit}&format=json&origin=*`);
+  return (j?.query?.geosearch || []).map(g => ({ title: g.title, lat: g.lat, lon: g.lon }));
+}
+function bestArticle(names, pos, articles, { maxD = 1000, minScore = 0.6, city = "" } = {}) {
+  let best = null;
+  for (const a of articles) {
+    const d = haversine(pos, [a.lat, a.lon]); if (d > maxD) continue;
+    const sc = Math.max(...names.map(n => titleScore(n, a.title, city)));
+    if (sc >= minScore && (!best || sc > best.sc || (sc === best.sc && d < best.d))) best = { ...a, sc, d };
+  }
+  return best;
+}
+/* Find and summarise the article for a named place. Returns the summary, or null when there is none. */
+async function wikiForPlace(name, lat, lon, { city = "", radius = 1000, search = true, minScore = 0.6 } = {}) {
+  const pos = [lat, lon];
+  const near = await wikiNear(lat, lon, radius);
+  let hit = bestArticle([name], pos, near, { maxD: radius, minScore, city });
+  if (!hit && search) {
+    // the name as a search, kept only if the article it finds is where the stop is
+    const q = [name, city && !nameTokens(name).join(" ").includes(nameTokens(city).join(" ")) ? city : ""].filter(Boolean).join(" ");
+    const j = await wget(`https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(q)}&gsrlimit=5&prop=coordinates|pageprops&ppprop=disambiguation&format=json&origin=*`);
+    const pages = Object.values(j?.query?.pages || {}).sort((a, b) => a.index - b.index);
+    const cityT = nameTokens(city).join(" ");
+    for (const p of pages) {
+      const c = p.coordinates?.[0]; if (!c || p.pageprops?.disambiguation !== undefined) continue;
+      if (cityT && nameTokens(p.title).join(" ") === cityT) continue; // the city's own article says nothing about the stop
+      // the top hit only when it is close by: a café's search can rank its whole district first
+      const d = haversine(pos, [c.lat, c.lon]);
+      if ((p.index === 1 && d <= 600) || (titleScore(name, p.title, city) >= 0.5 && d <= 1500)) { hit = { title: p.title }; break; }
+    }
+  }
+  return hit ? wikiPage("en", hit.title) : null;
+}
+/* The opening sentence of an extract, for places with only a line to spare. */
+function firstSentence(s, max = 160) {
+  const m = String(s || "").match(/^(.{20,}?[.!?])(\s|$)/);
+  const out = m ? m[1] : String(s || "");
+  return out.length > max ? out.slice(0, max - 1).replace(/\s+\S*$/, "") + "…" : out;
+}
+
+/* Summaries for this walk, by sheet id ("hl/3", "node/123"): a summary, or null for "looked, none".
+   Kept per walk in localStorage, so what was fetched with signal is there without it. */
+const wikiStore = {
+  key: null, items: {},
+  load(key) { clearTimeout(this._t); this.key = key; this.items = store.get(key + ":wiki")?.items || {}; state.set({ wiki: { ...this.items } }); },
+  has(id) { return id in this.items; },
+  put(key, id, v) {
+    if (key !== this.key) return; // a lookup that finished after the walk was changed
+    this.items[id] = v;
+    clearTimeout(this._t); this._t = setTimeout(() => this.flush(), 400);
+  },
+  flush() { if (!this.key) return; store.set(this.key + ":wiki", { t: Date.now(), items: this.items }); state.set({ wiki: { ...this.items } }); }
+};
+/* Run tasks a few at a time — Wikipedia is generous, but not to a burst of fifty. */
+async function pool(tasks, n = 3) {
+  let i = 0;
+  await Promise.all(Array.from({ length: Math.min(n, tasks.length) }, async () => { while (i < tasks.length) { const t = tasks[i++]; try { await t(); } catch (e) { console.warn(e); } } }));
+}
+/* Details for the walk's own stops: what the planner already found, else a lookup by name. */
+async function enrichHighlights(key, highlights, stops, city) {
+  highlights.forEach((h, i) => {
+    const id = "hl/" + i; if (wikiStore.has(id)) return;
+    const st = (stops || []).find(s => s.name === h.name);
+    if (st && st.wiki !== undefined) wikiStore.put(key, id, st.wiki || null);
+  });
+  const todo = highlights.map((h, i) => ({ h, id: "hl/" + i })).filter(({ h, id }) => !wikiStore.has(id) && !FACTS[h.name]);
+  await pool(todo.map(({ h, id }) => async () => wikiStore.put(key, id, await wikiForPlace(h.name, h.lat, h.lon, { city }))));
+}
+/* Details for the sights worth reading about, fetched ahead so they are there on the walk. Tagged
+   sights follow their tags; the rest are matched by name against the articles along the route. */
+async function prefetchSightWiki(key, route, pois, city) {
+  const todo = pois.filter(p => !wikiStore.has(p.id));
+  if (!todo.length) return;
+  const tagged = todo.filter(p => p.tags?.wikipedia || p.tags?.["wikipedia:en"] || p.tags?.wikidata);
+  const untagged = todo.filter(p => !tagged.includes(p) && p.score >= 4);
+  let near = [], complete = true;
+  if (untagged.length) {
+    const seen = new Set(), samples = [];
+    for (let s = 0; s <= route.length + 1399; s += 1400) samples.push(positionAt(route, Math.min(s, route.length)).pos);
+    for (const p of samples) {
+      let found; try { found = await wikiNear(p[0], p[1], 1000, 200); } catch { complete = false; continue; }
+      for (const a of found) if (!seen.has(a.title)) { seen.add(a.title); near.push(a); }
+    }
+  }
+  await pool(tagged.map(p => async () => wikiStore.put(key, p.id, await wikiSummary(p.tags)))
+    .concat(untagged.map(p => async () => {
+      const hit = bestArticle([p.name, p.tags?.name].filter(Boolean), [p.lat, p.lon], near, { maxD: 250, minScore: 0.75, city });
+      // "no article" is only remembered when every stretch of the route was actually asked
+      if (hit) wikiStore.put(key, p.id, await wikiPage("en", hit.title)); else if (complete) wikiStore.put(key, p.id, null);
+    })));
 }
 
 /* =====================================================================
@@ -775,9 +903,9 @@ async function wikiSummary(tags) {
    ===================================================================== */
 const state = {
   data: {
-    name: "", points: [], highlights: [], route: null, pois: [], poisStatus: "idle",
+    name: "", city: "", points: [], highlights: [], route: null, pois: [], poisStatus: "idle",
     pos: null, accuracy: null, gps: false, progress: 0, offRoute: false, offDist: 0, mode: "preview", // preview | gps
-    poisAll: [], roadside: [], ways: null, reroute: null, rerouting: false, weakSignal: false
+    poisAll: [], roadside: [], ways: null, reroute: null, rerouting: false, weakSignal: false, wiki: {}
   },
   subs: new Set(),
   set(patch) { Object.assign(this.data, patch); this.subs.forEach(fn => fn(this.data, patch)); },
@@ -966,6 +1094,7 @@ class WalkDirections extends HTMLElement {
     };
     const subHtml = (m, primary) => {
       if (m.kind === "arrive") return "";
+      if (m.kind === "depart" && !detour) { const f = firstStop(d); if (f) return f; }
       if (m.street && m.len > 0) return `then ${fmtDist(m.len)} along ${esc(m.street)}`;
       if (m.towards) return `unnamed path — reach ${esc(m.towards)} in ${fmtDist(m.towardsIn)}`;
       return m.len > 0 ? `then ${fmtDist(m.len)}` : "";
@@ -973,13 +1102,13 @@ class WalkDirections extends HTMLElement {
     const rows = up.map((u, i) => ({ type: "turn", in: u.in, html: `
       <li class="dir-item ${i === 0 ? "primary" : ""}" data-d="${u.m.d0}">
         <div class="icon">${iconFor(u.m.kind)}</div>
-        <div class="text"><div class="main">${mainHtml(u.m)}</div>${i === 0 && subHtml(u.m, true) ? `<div class="sub">${subHtml(u.m, true)}</div>` : ""}</div>
+        <div class="text"><div class="main">${mainHtml(u.m)}</div>${i === 0 && subHtml(u.m, true) ? `<div class="sub${u.m.kind === "depart" ? " wrap" : ""}">${subHtml(u.m, true)}</div>` : ""}</div>
         <div class="dist">${i === 0 ? (u.in < 15 ? "Now" : fmtDist(u.in)) : fmtDist(u.in)}</div>
       </li>` }));
     if (sight) rows.push({ type: "sight", in: sight.prog - d.progress, html: `
       <li class="dir-item sight" data-d="${sight.prog}" data-sight="${esc(sight.id)}">
         <div class="icon">${ICON.sight}</div>
-        <div class="text"><div class="main">${esc(sight.name)}</div><div class="sub">${esc(sight.desc || sight.kind || "")}</div></div>
+        <div class="text"><div class="main">${esc(sight.name)}</div><div class="sub">${esc(sightLine(sight, d))}</div></div>
         <div class="dist">${fmtDist(Math.max(0, sight.prog - d.progress))}</div>
       </li>` });
     rows.sort((a, b) => a.in - b.in);
@@ -992,6 +1121,26 @@ class WalkDirections extends HTMLElement {
 }
 customElements.define("walk-directions", WalkDirections);
 
+/* Which way to set off. The first instruction's compass point is no help on a loop, where the
+   route leaves and comes back by different streets from the same door — so name the stop it
+   reaches first. */
+function isLoop(route) { return route && route.length > 300 && haversine(route.shape[0], route.shape[route.shape.length - 1]) < 80; }
+function firstStop(d) {
+  const next = (d.roadside || []).find(x => x.kind === "highlight" && x.id !== "hl/0" && x.prog > 30);
+  if (!next) return "";
+  const n = +next.id.slice(3) + 1;
+  return `${isLoop(d.route) ? "Loop — set off" : "Set off"} towards <b class="road">${n}. ${esc(next.name)}</b>, ${fmtDist(next.prog)} away`;
+}
+/* One line on a sight: the walk's own note on a stop, else what Wikipedia says it is, else its kind. */
+function sightLine(x, d) {
+  const w = d.wiki?.[x.id], fs = w && typeof w === "object" ? firstSentence(w.extract, 120) : "";
+  return x.kind === "highlight" ? (x.desc || fs) : (fs || x.desc || x.kind || "");
+}
+/* A map popup with whatever is known about the place by the time it is opened. */
+function popupHtml(id, name, sub) {
+  const w = state.data.wiki?.[id], ok = w && typeof w === "object";
+  return `<div class="pop">${ok && w.thumb ? `<img src="${esc(w.thumb)}" alt="">` : ""}<b>${esc(name)}</b>${sub ? `<br><span class="pop-sub">${esc(sub)}</span>` : ""}${ok ? `<p>${esc(firstSentence(w.extract, 220))}</p>` : ""}</div>`;
+}
 function setPreviewProgress(p) {
   const r = state.data.route; if (!r) return;
   p = Math.max(0, Math.min(r.length, p));
@@ -1021,6 +1170,9 @@ class WalkMap extends HTMLElement {
     this.routeAhead2 = L.polyline([], { color: "#2563eb", weight: 6, opacity: .95, lineCap: "round", smoothFactor: 1.5 }).addTo(map);
     this.routeDone = L.polyline([], { color: "#9ca3af", weight: 6, opacity: .9, lineCap: "round", smoothFactor: 1.5 }).addTo(map);
     this.detour = L.polyline([], { color: "#ea580c", weight: 5, opacity: .95, dashArray: "8 8", lineCap: "round" }).addTo(map);
+    // which way the route runs — on a loop the line alone cannot say which way to set off
+    this.arrowLayer = L.layerGroup().addTo(map);
+    map.on("zoomend", () => this.drawArrows(state.data.route));
     this.wpLayer = L.layerGroup().addTo(map);
     this.planLayer = L.layerGroup().addTo(map);
     this.poiLayer = L.layerGroup().addTo(map);
@@ -1052,6 +1204,17 @@ class WalkMap extends HTMLElement {
     new ResizeObserver(() => map.invalidateSize()).observe(this);
   }
   setFollow(v) { this.follow = v; $("#follow", this).classList.toggle("on", v); }
+  drawArrows(route) {
+    this.arrowLayer.clearLayers();
+    if (!route) return;
+    // about one arrow per 90 px of line at this zoom, so the whole walk shows its direction too
+    const mpp = 156543.03 * Math.cos(route.shape[0][0] * Math.PI / 180) / Math.pow(2, this.map.getZoom());
+    const step = Math.max(120, 90 * mpp);
+    for (let s = Math.min(60, route.length / 2); s < route.length - 30; s += step) {
+      const a = positionAt(route, Math.max(0, s - 10)).pos, b = positionAt(route, Math.min(route.length, s + 10)).pos;
+      L.marker(positionAt(route, s).pos, { interactive: false, keyboard: false, icon: L.divIcon({ className: "", html: `<div class="route-arrow" style="transform:rotate(${Math.round(bearing(a, b))}deg)"><svg viewBox="0 0 12 12"><path d="M2.5 8.5L6 4l3.5 4.5"/></svg></div>`, iconSize: [16, 16], iconAnchor: [8, 8] }) }).addTo(this.arrowLayer);
+    }
+  }
   setPlanPins(stops) {
     this.planLayer.clearLayers();
     const pts = [];
@@ -1066,7 +1229,13 @@ class WalkMap extends HTMLElement {
     if (pts.length > 1) this.map.fitBounds(L.latLngBounds(pts), { padding: [40, 40] });
     else if (pts.length === 1) this.map.setView(pts[0], 15);
   }
-  fit() { const r = state.data.route; if (r) this.map.fitBounds(L.latLngBounds(r.shape), { padding: [30, 30] }); }
+  fit() {
+    const r = state.data.route; if (!r) return;
+    // Leaflet drops a view change made while a zoom is still animating, without a word, so a walk
+    // that loads quickly (a cached route) was left showing the last one. Wait for the zoom instead.
+    if (this.map._animatingZoom) { this.map.once("zoomend", () => this.fit()); return; }
+    this.map.fitBounds(L.latLngBounds(r.shape), { padding: [30, 30] });
+  }
   flyTo(pos) { this.setFollow(false); this.map.flyTo(pos, Math.max(this.map.getZoom(), 17), { duration: .6 }); }
   center(force) {
     const d = state.data; if (!d.pos) return;
@@ -1081,17 +1250,19 @@ class WalkMap extends HTMLElement {
   render(d, patch) {
     if (d.route !== this.lastRoute) {
       this.lastRoute = d.route; this.wpLayer.clearLayers(); this.lastDoneIdx = -1; this.zoomedIn = false;
+      if (!d.route) this.drawArrows(null);
       if (d.route) {
         this.routeAhead.setLatLngs(d.route.shape); this.routeAhead2.setLatLngs(d.route.shape); this.routeDone.setLatLngs([]);
-        d.highlights.forEach((h, i) => L.marker([h.lat, h.lon], { icon: L.divIcon({ className: "", html: `<div class="wp-marker">${i + 1}</div>`, iconSize: [22, 22], iconAnchor: [11, 11] }) })
-          .bindPopup(`<b>${esc(h.name)}</b><br>${esc(h.desc || "")}`).addTo(this.wpLayer));
+        this.drawArrows(d.route);
+        d.highlights.forEach((h, i) => L.marker([h.lat, h.lon], { zIndexOffset: i === 0 ? 500 : 0, icon: L.divIcon({ className: "", html: `<div class="wp-marker ${i === 0 ? "start" : ""}">${i + 1}</div>`, iconSize: [22, 22], iconAnchor: [11, 11] }) })
+          .bindPopup(() => popupHtml("hl/" + i, `${i + 1}. ${h.name}`, h.desc), { maxWidth: 260 }).addTo(this.wpLayer));
         this.fit();
       }
     }
     if (d.pois !== this.lastPois) {
       this.lastPois = d.pois; this.poiLayer.clearLayers();
       d.pois.forEach(p => L.marker([p.lat, p.lon], { icon: L.divIcon({ className: "", html: '<div class="poi-marker"></div>', iconSize: [12, 12], iconAnchor: [6, 6] }) })
-        .bindPopup(`<b>${esc(p.name)}</b><br><span style="color:#6b6b66">${esc(p.kind)}</span>`).on("click", () => document.getElementById("nearby").open(p.id)).addTo(this.poiLayer));
+        .bindPopup(() => popupHtml(p.id, p.name, p.kind), { maxWidth: 260 }).on("click", () => document.getElementById("nearby").open(p.id)).addTo(this.poiLayer));
     }
     if (d.route && d.pos) {
       if (!this.map.hasLayer(this.you)) { this.you.addTo(this.map); this.acc.addTo(this.map); }
@@ -1122,7 +1293,7 @@ customElements.define("walk-map", WalkMap);
    ===================================================================== */
 class WalkNearby extends HTMLElement {
   connectedCallback() {
-    this.tab = "nearby"; this.openIds = new Set(); this.wiki = {};
+    this.tab = "nearby"; this.openIds = new Set(); this.loading = new Set(); this.failed = new Set();
     this.innerHTML = `
       <div class="sheet-head" id="head"><div class="grip"></div><h2 id="sheetTitle">Nearby</h2><span class="count" id="count"></span><span id="chev">▲</span><button class="close" id="closeSheet" title="Hide">✕</button></div>
       <div class="tabs"><button data-tab="nearby" class="on">Nearby</button><button data-tab="highlights">Highlights</button><button data-tab="all">All sights</button></div>
@@ -1131,6 +1302,7 @@ class WalkNearby extends HTMLElement {
     this.querySelectorAll(".tabs button").forEach(b => b.onclick = () => { this.tab = b.dataset.tab; this.querySelectorAll(".tabs button").forEach(x => x.classList.toggle("on", x === b)); this.render(state.data); });
     state.on((d, patch) => {
       if ("pois" in patch || "route" in patch || "poisStatus" in patch) return this.render(d);
+      if ("wiki" in patch && this.classList.contains("open")) return this.render(d);
       if (("progress" in patch || "pos" in patch) && this.classList.contains("open")) {
         clearTimeout(this._t); this._t = setTimeout(() => this.refreshDistances(state.data), 1500); // throttle while walking
       }
@@ -1150,7 +1322,7 @@ class WalkNearby extends HTMLElement {
   open(id) { this.toggle(true); this.tab = "all"; this.querySelectorAll(".tabs button").forEach(x => x.classList.toggle("on", x.dataset.tab === "all")); this.openIds.add(id); this.render(state.data); const el = this.querySelector(`[data-id="${CSS.escape(id)}"]`); el?.scrollIntoView({ block: "nearest" }); this.loadWiki(id); }
   items(d) {
     const pos = d.pos, prog = d.progress;
-    const hi = d.highlights.map((h, i) => ({ id: "hl/" + i, name: h.name, lat: h.lat, lon: h.lon, kind: "highlight", desc: h.desc, facts: FACTS[h.name] || [], highlight: true, order: i }));
+    const hi = d.highlights.map((h, i) => ({ id: "hl/" + i, name: h.name, lat: h.lat, lon: h.lon, kind: "highlight", desc: h.desc, facts: FACTS[h.name] || [], highlight: true, order: i, findByName: true }));
     // route notes attached to named route points
     const notes = d.points.filter(p => ROUTE_NOTES[p.name]).map((p, i) => ({ id: "note/" + i, name: p.name.replace(/ (mid|south|north|return|southbound)$/, ""), lat: p.lat, lon: p.lon, kind: "on the way", facts: [ROUTE_NOTES[p.name]], highlight: false }));
     const src = this.tab === "all" && this.showAll ? (d.poisAll || d.pois) : d.pois;
@@ -1174,33 +1346,42 @@ class WalkNearby extends HTMLElement {
     }
     this._list = list;
     body.innerHTML = list.map(x => {
-      const w = this.wiki[x.id];
+      const w = this.loading.has(x.id) ? "loading" : (d.wiki || {})[x.id];
       const facts = (x.facts || []).map(f => `<p class="fact">${esc(f)}</p>`).join("");
-      const wikiHtml = w === undefined ? "" : w === null ? `<p class="meta">No Wikipedia article found.</p>` : w === "loading" ? `<p class="meta">Loading facts…</p>` :
-        `${w.thumb ? `<img src="${esc(w.thumb)}" alt="">` : ""}<p class="fact">${esc(w.extract)}</p><p class="meta"><a href="${esc(w.url)}" target="_blank" rel="noopener">Wikipedia${w.lang !== "en" ? ` (no English article — ${w.lang.toUpperCase()} shown)` : ""}</a></p>`;
+      const wikiHtml = w === undefined ? (this.failed.has(x.id) ? `<p class="meta">Couldn't reach Wikipedia — no signal? Try again later.</p>` : "") : w === null ? `<p class="meta">No Wikipedia article found.</p>` : w === "loading" ? `<p class="meta">Loading facts…</p>` :
+        `${w.thumb ? `<img src="${esc(w.thumb)}" alt="">` : ""}<p class="fact">${esc(w.extract)}</p><p class="meta"><a href="${esc(w.url)}" target="_blank" rel="noopener">Wikipedia${w.title && w.title !== x.name ? `: ${esc(w.title)}` : ""}${w.lang !== "en" ? ` (no English article — ${w.lang.toUpperCase()} shown)` : ""}</a></p>`;
       const t = x.tags || {};
       const meta = [t.opening_hours ? `Hours: ${esc(t.opening_hours)}` : "", t["description:en"] ? esc(t["description:en"]) : "", t["inscription:en"] ? `“${esc(t["inscription:en"])}”` : "", t.website ? `<a href="${esc(t.website)}" target="_blank" rel="noopener">Website</a>` : ""].filter(Boolean).join(" · ");
-      const hasWiki = t.wikipedia || t["wikipedia:en"] || t.wikidata;
+      const canLook = !x.id.startsWith("note/");
+      // a line of what it is, readable without opening the card
+      const snip = x.desc || (w && typeof w === "object" ? firstSentence(w.extract) : x.facts?.[0] ? firstSentence(x.facts[0]) : "");
       return `<div class="poi ${x.highlight ? "highlight" : ""} ${this.openIds.has(x.id) ? "open" : ""}" data-id="${esc(x.id)}">
         <div class="poi-head"><span class="name">${x.order != null ? x.order + 1 + ". " : ""}${esc(x.name)}</span><span class="kind">${esc(x.kind)}</span>${x.dist != null ? `<span class="dist">${fmtDist(x.dist)}</span>` : ""}<span class="caret">▼</span></div>
+        ${snip ? `<div class="poi-snip">${esc(snip)}</div>` : ""}
         <div class="poi-body">${x.desc ? `<p class="meta">${esc(x.desc)}</p>` : ""}${facts}${wikiHtml}${meta ? `<p class="meta">${meta}</p>` : ""}
-          <div class="actions"><button data-act="map">Show on map</button>${hasWiki && w === undefined ? `<button data-act="wiki">Read more (Wikipedia)</button>` : ""}</div>
+          <div class="actions"><button data-act="map">Show on map</button>${canLook && w === undefined ? `<button data-act="wiki">${t.wikipedia || t["wikipedia:en"] || t.wikidata ? "Read more (Wikipedia)" : "Look up on Wikipedia"}</button>` : ""}</div>
         </div></div>`;
     }).join("") + (hidden > 0 ? `<button class="show-more" id="showMore">Show ${hidden} more minor sights</button>` : this.showAll && this.tab === "all" ? `<button class="show-more" id="showMore">Show only the top sights</button>` : "");
     const sm = $("#showMore", this); if (sm) sm.onclick = () => { this.showAll = !this.showAll; this.render(state.data); };
     body.querySelectorAll(".poi").forEach(el => {
       const id = el.dataset.id;
-      $(".poi-head", el).onclick = () => { if (this.openIds.has(id)) this.openIds.delete(id); else { this.openIds.add(id); } el.classList.toggle("open"); };
+      const flip = () => { if (this.openIds.has(id)) this.openIds.delete(id); else { this.openIds.add(id); } el.classList.toggle("open"); };
+      $(".poi-head", el).onclick = flip; const sn = $(".poi-snip", el); if (sn) sn.onclick = flip;
       $('[data-act="map"]', el).onclick = () => { const x = list.find(i => i.id === id); document.getElementById("map").flyTo([x.lat, x.lon]); };
       const wb = $('[data-act="wiki"]', el); if (wb) wb.onclick = () => this.loadWiki(id);
     });
   }
   async loadWiki(id) {
     const x = this.items(state.data).find(i => i.id === id);
-    if (!x || !x.tags || this.wiki[id] !== undefined) return;
-    this.wiki[id] = "loading"; this.render(state.data);
-    try { this.wiki[id] = await wikiSummary(x.tags); } catch { this.wiki[id] = null; }
-    this.render(state.data);
+    if (!x || id.startsWith("note/") || wikiStore.has(id) || this.loading.has(id)) return;
+    const key = wikiStore.key, t = x.tags || {};
+    this.loading.add(id); this.failed.delete(id); this.render(state.data);
+    try {
+      const w = t.wikipedia || t["wikipedia:en"] || t.wikidata ? await wikiSummary(t)
+        : await wikiForPlace(x.name, x.lat, x.lon, { city: state.data.city, radius: x.findByName ? 1000 : 300, search: !!x.findByName, minScore: x.findByName ? 0.6 : 0.75 });
+      wikiStore.put(key, id, w); wikiStore.flush();
+    } catch (e) { console.warn(e); this.failed.add(id); }
+    this.loading.delete(id); this.render(state.data);
   }
 }
 customElements.define("walk-nearby", WalkNearby);
@@ -1242,10 +1423,13 @@ async function loadWalk(gpxText, { force = false, id = null, city = "", stops = 
   // remember it in the library
   const wid = id || "gpx:" + hashStr(gpxText);
   const existing = library.get(wid);
-  library.upsert({ id: wid, name: parsed.name, gpx: gpxText, city: city || existing?.city || "", stops: stops || existing?.stops || parsed.highlights.map(h => ({ name: h.name, desc: h.desc, lat: h.lat, lon: h.lon })) });
+  const walkCity = city || existing?.city || "", walkStops = stops || existing?.stops || parsed.highlights.map(h => ({ name: h.name, desc: h.desc, lat: h.lat, lon: h.lon }));
+  library.upsert({ id: wid, name: parsed.name, gpx: gpxText, city: walkCity, stops: walkStops });
   store.set("walk:currentId", wid);
   $("#title").textContent = parsed.name;
-  state.set({ name: parsed.name, points: parsed.route, highlights: parsed.highlights, route: null, pois: [], poisStatus: "idle", progress: 0, pos: null });
+  state.set({ name: parsed.name, city: walkCity, points: parsed.route, highlights: parsed.highlights, route: null, pois: [], poisStatus: "idle", progress: 0, pos: null });
+  wikiStore.load(key);
+  enrichHighlights(key, parsed.highlights, walkStops, walkCity).catch(e => console.warn("stop details", e));
   const overlay = $("#overlay"), ot = $("#overlayText");
   let route = force ? null : store.get(key);
   if (!route) {
@@ -1301,6 +1485,7 @@ async function loadPOIs(route, key) {
   }
   const ranked = pois ? rankPOIs(pois, route, 5) : { all: [], top: [] };
   state.set({ pois: ranked.top, poisAll: ranked.all, poisStatus: pois ? "ok" : state.data.poisStatus, roadside: buildRoadside(route, state.data.highlights, ranked.top) });
+  if (pois) prefetchSightWiki(key, route, ranked.top, state.data.city).catch(e => console.warn("sight details", e));
 }
 
 /* ---------- live tracking ---------- */
@@ -1374,6 +1559,11 @@ function startGPS() {
   }
   const btn = $("#gpsBtn"); btn.classList.add("busy");
   tracker.reset();
+  // Start from where the walk says you are (the start, unless the slider moved it). Searching the
+  // whole route on the first fix lets a loop's start match its finish, a few metres away, and
+  // then the walk reads as done before it has begun. Someone really elsewhere on the route is
+  // found by the re-sync after three fixes.
+  if (state.data.route) tracker.anchor(state.data.progress);
   watchId = navigator.geolocation.watchPosition(p => {
     btn.classList.remove("busy"); btn.classList.add("on");
     const r = state.data.route; if (!r) return;
@@ -1451,7 +1641,7 @@ const planner = {
     this.restored = true; this.editId = entry.id === "builtin" ? null : entry.id; // the built-in loop is never overwritten
     $("#planName").value = entry.id === "builtin" ? "Paris loop (edited)" : (entry.name || ""); $("#planCity").value = entry.city || $("#planCity").value || "Paris";
     const stops = entry.stops?.length ? entry.stops : [];
-    this.stops = stops.map((st, i) => ({ text: `${i === 0 ? "Start: " : ""}${st.name}${st.desc ? " — " + st.desc : ""}`, name: st.name, desc: st.desc || "", start: i === 0, lat: st.lat ?? null, lon: st.lon ?? null, status: st.lat != null ? "ok" : "pending", label: st.lat != null ? "from saved walk" : "" }));
+    this.stops = stops.map((st, i) => ({ text: `${i === 0 ? "Start: " : ""}${st.name}${st.desc ? " — " + st.desc : ""}`, name: st.name, desc: st.desc || "", start: i === 0, lat: st.lat ?? null, lon: st.lon ?? null, status: st.lat != null ? "ok" : "pending", label: st.lat != null ? "from saved walk" : "", ...(st.wiki !== undefined ? { wiki: st.wiki } : {}) }));
     $("#planText").value = stopsText(entry);
     this.saveDraft(); this.open();
   },
@@ -1469,24 +1659,35 @@ const planner = {
     const city = $("#planCity").value.trim();
     const fresh = this.parse($("#planText").value);
     // keep coordinates of stops the user already fixed by dragging
-    fresh.forEach(st => { const old = this.stops.find(o => o.text === st.text && o.lat != null); if (old) Object.assign(st, { lat: old.lat, lon: old.lon, status: old.status, label: old.label }); });
+    fresh.forEach(st => { const old = this.stops.find(o => o.text === st.text && o.lat != null); if (old) Object.assign(st, { lat: old.lat, lon: old.lon, status: old.status, label: old.label }, old.wiki !== undefined ? { wiki: old.wiki } : {}); });
     this.stops = fresh; this.busy = true; this.render(); this.saveDraft();
     let bias = null;
     $("#planStatus").textContent = googleKey() ? "Looking up places with Google Places…" : "Looking up places with OpenStreetMap…";
     if (city) { const c = await geocode(city); if (c) bias = [c.lat, c.lon]; }
+    const details = [];
     for (const st of this.stops) {
-      if (st.lat != null) continue;
-      $("#planStatus").textContent = `Looking up “${st.name}”…`;
-      const q = city && !st.name.toLowerCase().includes(city.toLowerCase()) ? `${st.name}, ${city}` : st.name;
-      const g = await geocode(q, bias);
-      if (g && (!bias || haversine(bias, [g.lat, g.lon]) < 40000)) { st.lat = g.lat; st.lon = g.lon; st.label = g.label; st.status = "ok"; }
-      else st.status = "missing";
-      this.render(); document.getElementById("map").setPlanPins(this.stops);
+      if (st.lat == null) {
+        $("#planStatus").textContent = `Looking up “${st.name}”…`;
+        const q = city && !st.name.toLowerCase().includes(city.toLowerCase()) ? `${st.name}, ${city}` : st.name;
+        const g = await geocode(q, bias);
+        if (g && (!bias || haversine(bias, [g.lat, g.lon]) < 40000)) { st.lat = g.lat; st.lon = g.lon; st.label = g.label; st.status = "ok"; delete st.wiki; }
+        else st.status = "missing";
+        this.render(); document.getElementById("map").setPlanPins(this.stops);
+      }
+      if (st.lat != null && st.wiki === undefined) details.push(this.lookupDetails(st, city));
     }
+    if (details.length) { $("#planStatus").textContent = "Finding details on each stop…"; await Promise.all(details); }
     this.busy = false; this.saveDraft();
     const missing = this.stops.filter(s => s.status === "missing").length;
     $("#planStatus").textContent = missing ? `${missing} not found — rephrase them (add the street or district) or tap the map to place them.` : "Check the pins, drag any that are off, then build the route.";
     this.render();
+  },
+  /* what Wikipedia says about a stop, found by its name near where it was placed; shown in the list
+     so a stop that geocoded to the wrong place says so before the walk is built */
+  async lookupDetails(st, city) {
+    try { st.wiki = await wikiForPlace(st.name, st.lat, st.lon, { city }); }
+    catch (e) { console.warn("details", st.name, e); return; } // no signal: try again on the next Find, or when the walk opens
+    if (this.stops.includes(st)) { this.render(); this.saveDraft(); }
   },
   addAt(lat, lon) {
     const n = this.stops.length + 1;
@@ -1498,7 +1699,7 @@ const planner = {
     }).catch(() => { });
     this.syncText(); this.render(); document.getElementById("map").setPlanPins(this.stops); this.saveDraft();
   },
-  moved(i, lat, lon) { const st = this.stops[i]; if (!st) return; st.lat = lat; st.lon = lon; st.status = "ok"; st.label = "moved by hand"; this.render(); this.saveDraft(); },
+  moved(i, lat, lon) { const st = this.stops[i]; if (!st) return; st.lat = lat; st.lon = lon; st.status = "ok"; st.label = "moved by hand"; delete st.wiki; this.render(); this.saveDraft(); this.lookupDetails(st, $("#planCity").value.trim()); },
   remove(i) { this.stops.splice(i, 1); this.syncText(); this.render(); document.getElementById("map").setPlanPins(this.stops); this.saveDraft(); },
   move(i, dir) { const j = i + dir; if (j < 0 || j >= this.stops.length) return; [this.stops[i], this.stops[j]] = [this.stops[j], this.stops[i]]; this.syncText(); this.render(); document.getElementById("map").setPlanPins(this.stops); this.saveDraft(); },
   syncText() { $("#planText").value = this.stops.map((st, i) => `${i === 0 ? "Start: " : ""}${st.name}${st.desc ? " — " + st.desc : ""}`).join("\n"); },
@@ -1521,7 +1722,7 @@ const planner = {
       stops.map(s => `  <wpt lat="${s.lat.toFixed(6)}" lon="${s.lon.toFixed(6)}"><name>${esc(s.name)}</name>${s.desc ? `<desc>${esc(s.desc)}</desc>` : ""}</wpt>`).join("\n") +
       `\n  <rte><name>${esc(name)}</name>\n` + rte.map(s => `    <rtept lat="${s.lat.toFixed(6)}" lon="${s.lon.toFixed(6)}"><name>${esc(s.name)}</name></rtept>`).join("\n") + `\n  </rte>\n</gpx>\n`;
     const id = this.editId || "plan:" + Date.now().toString(36);
-    const saved = stops.map(s => ({ name: s.name, desc: s.desc, lat: s.lat, lon: s.lon }));
+    const saved = stops.map(s => ({ name: s.name, desc: s.desc, lat: s.lat, lon: s.lon, ...(s.wiki !== undefined ? { wiki: s.wiki } : {}) }));
     this.close();
     store.del("walk:plannerDraft"); this.restored = false; this.editId = null; this.stops = [];
     $("#planText").value = ""; $("#planName").value = "";
@@ -1530,7 +1731,7 @@ const planner = {
   render() {
     const ol = $("#planStops");
     ol.innerHTML = this.stops.map((st, i) => `<li class="plan-stop ${st.status}"><span class="n">${i + 1}</span>
-      <span><span class="name">${esc(st.name)}</span>${st.desc ? ` <span class="where">— ${esc(st.desc)}</span>` : ""}<br><span class="where">${st.status === "pending" ? "looking up…" : st.status === "missing" ? "not found — drag a pin here or rephrase" : esc(st.label || "")}</span></span>
+      <span><span class="name">${esc(st.name)}</span>${st.desc ? ` <span class="where">— ${esc(st.desc)}</span>` : ""}<br><span class="where">${st.status === "pending" ? "looking up…" : st.status === "missing" ? "not found — drag a pin here or rephrase" : esc(st.label || "")}</span>${st.wiki ? `<span class="wiki"><b>${esc(st.wiki.title)}</b> — ${esc(firstSentence(st.wiki.extract, 140))}</span>` : st.wiki === null ? `<span class="wiki none">No Wikipedia article found near this pin</span>` : ""}</span>
       <span class="ctl"><button data-act="up" title="Move up">▲</button><button data-act="down" title="Move down">▼</button><button data-act="del" title="Remove">✕</button></span></li>`).join("");
     ol.querySelectorAll(".plan-stop").forEach((li, i) => {
       li.querySelector('[data-act="up"]').onclick = () => this.move(i, -1);
