@@ -143,6 +143,15 @@
   /* ---------- nearby sheet ---------- */
   walk-nearby { display: flex; flex-direction: column; flex-shrink: 0; background: var(--panel); border-top: 1px solid var(--line); box-shadow: 0 -4px 16px rgba(0,0,0,.06); z-index: 950; transition: max-height .25s ease; max-height: 52px; overflow: hidden; }
   walk-nearby.open { max-height: 58vh; }
+  /* On a phone the open sheet has to fit what is left, and it did not: header, directions and the
+     map's floor took 540 of 740px, the sheet asked for 429 more, and the body clips — so the last
+     200px of the list were below the screen, unreachable, with no edge to say so. Open, the sheet
+     may shrink, the map gives up most of its floor, and the directions keep only the next turn. */
+  @media (max-width: 899px) {
+    walk-nearby.open { flex-shrink: 1; min-height: 180px; }
+    body.sheet-open walk-map { min-height: 90px; }
+    body.sheet-open walk-directions .dir-list li:not(.primary), body.sheet-open walk-directions .scrub { display: none; }
+  }
   .sheet-head, .tabs { flex-shrink: 0; }
   .sheet-head { position: relative; display: flex; align-items: center; gap: 10px; height: 52px; padding: 0 14px; cursor: pointer; user-select: none; }
   .sheet-head .grip { width: 36px; height: 4px; border-radius: 2px; background: #d4d4d4; position: absolute; left: 50%; transform: translateX(-50%); top: 6px; }
@@ -757,30 +766,43 @@ async function wikiPage(lang, title) {
   if (!j || !j.extract || j.type === "disambiguation") return null;
   return { title: j.title, extract: j.extract, thumb: j.thumbnail?.source, url: j.content_urls?.desktop?.page || j.content_urls?.mobile?.page, lang };
 }
-/* The English article for an OSM object's wikipedia / wikidata tags, else the original language's. */
-async function wikiSummary(tags) {
+/* An OSM object's article, always in English. The tags often point at the local Wikipedia (nl:,
+   fr:), so the English one is found through its language links or Wikidata; failing that, an English
+   article near the place under the same name. A place with only a local article gets Wikidata's
+   English one-line description and a link to the local article opened through a translator —
+   never the local text itself, which in Amsterdam meant a sheet full of Dutch. */
+async function wikiSummary(tags, place = null) {
   // 1. explicit English article
   if (tags["wikipedia:en"]) { const s = await wikiPage("en", tags["wikipedia:en"]); if (s) return s; }
-  // 2. the wikipedia tag (usually fr:Title) — find the English equivalent through its language links
-  let lang = null, title = null;
-  if (tags.wikipedia) { const m = tags.wikipedia.match(/^(\w+):(.+)$/); if (m) { lang = m[1]; title = m[2]; } else { lang = "en"; title = tags.wikipedia; } }
+  // 2. the wikipedia tag, and through its language links the English equivalent
+  let lang = null, title = null, qid = tags.wikidata || null;
+  if (tags.wikipedia) { const m = tags.wikipedia.match(/^([a-z-]{2,12}):(.+)$/); if (m) { lang = m[1]; title = m[2]; } else { lang = "en"; title = tags.wikipedia; } }
   if (title && lang === "en") { const s = await wikiPage("en", title); if (s) return s; }
   if (title && lang !== "en") {
-    const j = await wget(`https://${lang}.wikipedia.org/w/api.php?action=query&prop=langlinks&lllang=en&redirects=1&format=json&origin=*&titles=${encodeURIComponent(title)}`);
-    const en = Object.values(j?.query?.pages || {})[0]?.langlinks?.[0]?.["*"];
+    const j = await wget(`https://${lang}.wikipedia.org/w/api.php?action=query&prop=langlinks|pageprops&lllang=en&ppprop=wikibase_item&redirects=1&format=json&origin=*&titles=${encodeURIComponent(title)}`);
+    const pg = Object.values(j?.query?.pages || {})[0];
+    const en = pg?.langlinks?.[0]?.["*"];
     if (en) { const s = await wikiPage("en", en); if (s) return s; }
+    qid ||= pg?.pageprops?.wikibase_item || null;
   }
-  // 3. Wikidata sitelinks → English article
-  if (tags.wikidata) {
-    const j = await wget(`https://www.wikidata.org/w/api.php?action=wbgetentities&ids=${encodeURIComponent(tags.wikidata)}&props=sitelinks&format=json&origin=*`);
-    const sl = Object.values(j?.entities || {})[0]?.sitelinks || {};
+  // 3. Wikidata: the English article if there is one, else its English label and description
+  let label = "", desc = "";
+  if (qid) {
+    const j = await wget(`https://www.wikidata.org/w/api.php?action=wbgetentities&ids=${encodeURIComponent(qid)}&props=sitelinks|labels|descriptions&languages=en&format=json&origin=*`);
+    const ent = Object.values(j?.entities || {})[0] || {}, sl = ent.sitelinks || {};
     if (sl.enwiki) { const s = await wikiPage("en", sl.enwiki.title); if (s) return s; }
+    label = ent.labels?.en?.value || ""; desc = ent.descriptions?.en?.value || "";
     if (!title) { const k = Object.keys(sl).find(k => /^[a-z]{2,3}wiki$/.test(k)); if (k) { lang = k.slice(0, -4); title = sl[k].title; } }
   }
-  // 4. no English article: fall back to the original language
-  if (title && lang) return wikiPage(lang, title);
-  return null;
+  // 4. an English article near the place that OSM never linked
+  if (place) { const s = await wikiForPlace(place.name, place.lat, place.lon, { radius: 300, search: false, minScore: 0.75 }); if (s) return s; }
+  // 5. what English there is, and the local article for anyone who wants it translated
+  if (!desc && !title) return null;
+  const local = title ? `https://${lang}.wikipedia.org/wiki/${encodeURIComponent(title.replace(/ /g, "_"))}` : "";
+  return { title: label || title || "", extract: desc ? desc[0].toUpperCase() + desc.slice(1) + "." : "", lang: "en", localLang: title ? lang : null,
+    url: local ? `https://translate.google.com/translate?sl=${lang}&tl=en&u=${encodeURIComponent(local)}` : "" };
 }
+function languageName(code) { try { return new Intl.DisplayNames(["en"], { type: "language" }).of(code); } catch { return code.toUpperCase(); } }
 
 /* A place with no tags to follow — a stop typed into the planner, a sight OSM never linked — is found
    by name among the articles near it. Nearness does most of the work: "Westerkerk" has one article
@@ -850,14 +872,14 @@ function firstSentence(s, max = 160) {
    Kept per walk in localStorage, so what was fetched with signal is there without it. */
 const wikiStore = {
   key: null, items: {},
-  load(key) { clearTimeout(this._t); this.key = key; this.items = store.get(key + ":wiki")?.items || {}; state.set({ wiki: { ...this.items } }); },
+  load(key) { clearTimeout(this._t); this.key = key; this.items = store.get(key + ":wiki2")?.items || {}; store.del(key + ":wiki"); state.set({ wiki: { ...this.items } }); }, // the old :wiki could hold local-language text
   has(id) { return id in this.items; },
   put(key, id, v) {
     if (key !== this.key) return; // a lookup that finished after the walk was changed
     this.items[id] = v;
     clearTimeout(this._t); this._t = setTimeout(() => this.flush(), 400);
   },
-  flush() { if (!this.key) return; store.set(this.key + ":wiki", { t: Date.now(), items: this.items }); state.set({ wiki: { ...this.items } }); }
+  flush() { if (!this.key) return; store.set(this.key + ":wiki2", { t: Date.now(), items: this.items }); state.set({ wiki: { ...this.items } }); }
 };
 /* Run tasks a few at a time — Wikipedia is generous, but not to a burst of fifty. */
 async function pool(tasks, n = 3) {
@@ -890,7 +912,7 @@ async function prefetchSightWiki(key, route, pois, city) {
       for (const a of found) if (!seen.has(a.title)) { seen.add(a.title); near.push(a); }
     }
   }
-  await pool(tagged.map(p => async () => wikiStore.put(key, p.id, await wikiSummary(p.tags)))
+  await pool(tagged.map(p => async () => wikiStore.put(key, p.id, await wikiSummary(p.tags, p)))
     .concat(untagged.map(p => async () => {
       const hit = bestArticle([p.name, p.tags?.name].filter(Boolean), [p.lat, p.lon], near, { maxD: 250, minScore: 0.75, city });
       // "no article" is only remembered when every stretch of the route was actually asked
@@ -1139,7 +1161,7 @@ function sightLine(x, d) {
 /* A map popup with whatever is known about the place by the time it is opened. */
 function popupHtml(id, name, sub) {
   const w = state.data.wiki?.[id], ok = w && typeof w === "object";
-  return `<div class="pop">${ok && w.thumb ? `<img src="${esc(w.thumb)}" alt="">` : ""}<b>${esc(name)}</b>${sub ? `<br><span class="pop-sub">${esc(sub)}</span>` : ""}${ok ? `<p>${esc(firstSentence(w.extract, 220))}</p>` : ""}</div>`;
+  return `<div class="pop">${ok && w.thumb ? `<img src="${esc(w.thumb)}" alt="">` : ""}<b>${esc(name)}</b>${sub ? `<br><span class="pop-sub">${esc(sub)}</span>` : ""}${ok && w.extract ? `<p>${esc(firstSentence(w.extract, 220))}</p>` : ""}</div>`;
 }
 function setPreviewProgress(p) {
   const r = state.data.route; if (!r) return;
@@ -1299,17 +1321,27 @@ class WalkNearby extends HTMLElement {
       <div class="tabs"><button data-tab="nearby" class="on">Nearby</button><button data-tab="highlights">Highlights</button><button data-tab="all">All sights</button></div>
       <div class="sheet-body" id="body"></div>`;
     $("#head", this).onclick = () => this.toggle();
-    this.querySelectorAll(".tabs button").forEach(b => b.onclick = () => { this.tab = b.dataset.tab; this.querySelectorAll(".tabs button").forEach(x => x.classList.toggle("on", x === b)); this.render(state.data); });
+    this.querySelectorAll(".tabs button").forEach(b => b.onclick = () => { this.tab = b.dataset.tab; this.querySelectorAll(".tabs button").forEach(x => x.classList.toggle("on", x === b)); $("#body", this).scrollTop = 0; this.render(state.data); });
     state.on((d, patch) => {
       if ("pois" in patch || "route" in patch || "poisStatus" in patch) return this.render(d);
-      if ("wiki" in patch && this.classList.contains("open")) return this.render(d);
+      if ("wiki" in patch && this.classList.contains("open")) return this.renderSoon();
       if (("progress" in patch || "pos" in patch) && this.classList.contains("open")) {
         clearTimeout(this._t); this._t = setTimeout(() => this.refreshDistances(state.data), 1500); // throttle while walking
       }
     });
     $("#closeSheet", this).onclick = e => { e.stopPropagation(); this.toggle(false); };
+    const body = $("#body", this), touched = () => { this._touchedAt = Date.now(); };
+    ["touchstart", "touchmove", "scroll", "wheel"].forEach(ev => body.addEventListener(ev, touched, { passive: true }));
   }
-  toggle(force) { const open = force ?? !this.classList.contains("open"); this.classList.toggle("open", open); $("#chev", this).textContent = open ? "▼" : "▲"; if (open) this.render(state.data); }
+  /* Details arrive a few at a time while the list is open; rebuilding it under a moving finger
+     kills the scroll, so wait until the list has been still for a moment. */
+  renderSoon() {
+    clearTimeout(this._rs);
+    const wait = 1200 - (Date.now() - (this._touchedAt || 0));
+    if (wait > 0) { this._rs = setTimeout(() => this.renderSoon(), wait); return; }
+    this.render(state.data);
+  }
+  toggle(force) { const open = force ?? !this.classList.contains("open"); this.classList.toggle("open", open); document.body.classList.toggle("sheet-open", open); $("#chev", this).textContent = open ? "▼" : "▲"; if (open) this.render(state.data); }
   refreshDistances(d) {
     // update distance labels without rebuilding the DOM (a rebuild would swallow taps)
     if (!d.pos) return;
@@ -1345,11 +1377,12 @@ class WalkNearby extends HTMLElement {
       return;
     }
     this._list = list;
+    const keepScroll = body.scrollTop;
     body.innerHTML = list.map(x => {
       const w = this.loading.has(x.id) ? "loading" : (d.wiki || {})[x.id];
       const facts = (x.facts || []).map(f => `<p class="fact">${esc(f)}</p>`).join("");
       const wikiHtml = w === undefined ? (this.failed.has(x.id) ? `<p class="meta">Couldn't reach Wikipedia — no signal? Try again later.</p>` : "") : w === null ? `<p class="meta">No Wikipedia article found.</p>` : w === "loading" ? `<p class="meta">Loading facts…</p>` :
-        `${w.thumb ? `<img src="${esc(w.thumb)}" alt="">` : ""}<p class="fact">${esc(w.extract)}</p><p class="meta"><a href="${esc(w.url)}" target="_blank" rel="noopener">Wikipedia${w.title && w.title !== x.name ? `: ${esc(w.title)}` : ""}${w.lang !== "en" ? ` (no English article — ${w.lang.toUpperCase()} shown)` : ""}</a></p>`;
+        `${w.thumb ? `<img src="${esc(w.thumb)}" alt="">` : ""}${w.extract ? `<p class="fact">${esc(w.extract)}</p>` : ""}${w.url ? `<p class="meta"><a href="${esc(w.url)}" target="_blank" rel="noopener">${w.localLang ? `No English article — open the ${esc(languageName(w.localLang))} one, translated` : `Wikipedia${w.title && w.title !== x.name ? `: ${esc(w.title)}` : ""}`}</a></p>` : ""}`;
       const t = x.tags || {};
       const meta = [t.opening_hours ? `Hours: ${esc(t.opening_hours)}` : "", t["description:en"] ? esc(t["description:en"]) : "", t["inscription:en"] ? `“${esc(t["inscription:en"])}”` : "", t.website ? `<a href="${esc(t.website)}" target="_blank" rel="noopener">Website</a>` : ""].filter(Boolean).join(" · ");
       const canLook = !x.id.startsWith("note/");
@@ -1362,6 +1395,7 @@ class WalkNearby extends HTMLElement {
           <div class="actions"><button data-act="map">Show on map</button>${canLook && w === undefined ? `<button data-act="wiki">${t.wikipedia || t["wikipedia:en"] || t.wikidata ? "Read more (Wikipedia)" : "Look up on Wikipedia"}</button>` : ""}</div>
         </div></div>`;
     }).join("") + (hidden > 0 ? `<button class="show-more" id="showMore">Show ${hidden} more minor sights</button>` : this.showAll && this.tab === "all" ? `<button class="show-more" id="showMore">Show only the top sights</button>` : "");
+    body.scrollTop = keepScroll;
     const sm = $("#showMore", this); if (sm) sm.onclick = () => { this.showAll = !this.showAll; this.render(state.data); };
     body.querySelectorAll(".poi").forEach(el => {
       const id = el.dataset.id;
@@ -1377,7 +1411,7 @@ class WalkNearby extends HTMLElement {
     const key = wikiStore.key, t = x.tags || {};
     this.loading.add(id); this.failed.delete(id); this.render(state.data);
     try {
-      const w = t.wikipedia || t["wikipedia:en"] || t.wikidata ? await wikiSummary(t)
+      const w = t.wikipedia || t["wikipedia:en"] || t.wikidata ? await wikiSummary(t, x)
         : await wikiForPlace(x.name, x.lat, x.lon, { city: state.data.city, radius: x.findByName ? 1000 : 300, search: !!x.findByName, minScore: x.findByName ? 0.6 : 0.75 });
       wikiStore.put(key, id, w); wikiStore.flush();
     } catch (e) { console.warn(e); this.failed.add(id); }
