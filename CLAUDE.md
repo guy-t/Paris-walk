@@ -93,6 +93,20 @@ a loop's first GPS fix was searched against the whole route, so a walker at
 the door matched the finish, metres away, and the walk read as done — the same
 fault as the hike's circuit, fixed the same way: `startGPS` anchors the tracker.
 
+**English, or a pointer to it — never the local text.** An OSM sight's
+`wikipedia` tag usually names the local article (`nl:…`), and with no English
+link the old fallback showed it as it was: fetched ahead, the sheet filled with
+Dutch. `wikiSummary` goes local → language links → Wikidata → an English
+article nearby by name, and when there is none shows Wikidata's English
+one-line description with a link that opens the local article translated.
+Summaries cache under `:wiki2` so the Dutch ones stored under `:wiki` went.
+
+**The walk's sheet had the hike's sheet bug.** Open, it asked for 58vh under a
+header, directions and a 160px map floor, the body clips, and the last 202px of
+the list were below a 740px screen. It shrinks now, and while it is open the
+map's floor drops and the directions keep only the next turn — measured at
+640, 740 and 900px tall, nothing clipped.
+
 **The two ports are still parked.** They were parked for the Picos week,
 which is done; they stay parked because the hike app is the one being walked
 with and the next trip is the Basque coast. Do not start a port without being
