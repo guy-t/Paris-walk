@@ -42,7 +42,7 @@ calculator.html   a scientific calculator, the same shape: one file, a
                   native web component, no build. An expression with
                   precedence and brackets (2 + 3 × 4 = 14, −3² = −9), trig in
                   degrees or radians, logs, powers, roots, factorial, π, e,
-                  Ans, a 2nd layer. 15 significant digits, a tape of past
+                  Ans, Ran#, a 2nd layer. 15 significant digits, a tape of past
                   sums in localStorage under `calc:tape`, DEG/RAD under
                   `calc:deg`.
 ```

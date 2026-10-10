@@ -114,9 +114,11 @@
 
     // ---- The expression --------------------------------------------------
     // Tokens: num (the digits as typed, exponent included), op, fn (which
-    // opens a bracket), lp, rp, const (π, e), ans, post (!, %, ², ³, ⁻¹).
-    const startsOperand = (t) => !!t && (t.t === 'num' || t.t === 'const' || t.t === 'ans' || t.t === 'lp' || t.t === 'fn');
-    const endsOperand = (t) => !!t && (t.t === 'num' || t.t === 'const' || t.t === 'ans' || t.t === 'rp' || t.t === 'post');
+    // opens a bracket), lp, rp, const (π, e), ans, rand (Ran#, with the value
+    // it was dealt when pressed), post (!, %, ², ³, ⁻¹).
+    const VALUE = { num: 1, const: 1, ans: 1, rand: 1 };
+    const startsOperand = (t) => !!t && (t.t in VALUE || t.t === 'lp' || t.t === 'fn');
+    const endsOperand = (t) => !!t && (t.t in VALUE || t.t === 'rp' || t.t === 'post');
 
     // A minus that is a sign sits against its number: "5 − −2", "−3²".
     const show = (tokens) => tokens.map((t, i) => {
@@ -128,6 +130,7 @@
         case 'rp': return ')';
         case 'const': return t.v;
         case 'ans': return 'Ans';
+        case 'rand': return 'Ran#';
         case 'post': return t.v;
       }
     }).join('').replace(/\s+/g, ' ').trim();
@@ -183,6 +186,7 @@
           case 'num': { const n = Number(t.v); if (Number.isNaN(n)) fail(INCOMPLETE); return n; }
           case 'const': return t.v === 'π' ? Math.PI : Math.E;
           case 'ans': return ans;
+          case 'rand': return t.v;
           case 'lp': { const v = expr(); if (peek() && peek().t === 'rp') i++; return v; }
           case 'fn': { const v = expr(); if (peek() && peek().t === 'rp') i++; return FN[t.v](v, deg); }
         }
@@ -294,6 +298,9 @@
       fn(v) { this.begin(false); this.push({ t: 'fn', v }); }
       constant(v) { this.begin(false); this.push({ t: 'const', v }); }
       ansKey() { this.begin(false); this.push({ t: 'ans' }); }
+      // Ran#: 0.000 to 0.999, as on a Casio, dealt once when the key is
+      // pressed so the preview does not reroll on every keystroke.
+      random() { this.begin(false); this.push({ t: 'rand', v: Math.floor(Math.random() * 1000) / 1000 }); }
       lparen() { this.begin(false); this.push({ t: 'lp' }); }
 
       rparen() {
@@ -345,7 +352,7 @@
     const KEYS = [
       ['2nd', 'sci', 'second'], ['DEG', 'sci', 'deg'], ['sin', 'sci', 'fn:sin', 'sin⁻¹', 'fn:asin'], ['cos', 'sci', 'fn:cos', 'cos⁻¹', 'fn:acos'], ['tan', 'sci', 'fn:tan', 'tan⁻¹', 'fn:atan'],
       ['x²', 'sci', 'post:²', 'x³', 'post:³'], ['xʸ', 'sci', 'op:^', 'ˣ√y', 'op:root'], ['√', 'sci', 'fn:sqrt', '∛', 'fn:cbrt'], ['ln', 'sci', 'fn:ln', 'eˣ', 'fn:exp'], ['log', 'sci', 'fn:log', '10ˣ', 'fn:pow10'],
-      ['π', 'sci', 'const:π'], ['e', 'sci', 'const:e'], ['1/x', 'sci', 'post:⁻¹', '|x|', 'fn:abs'], ['x!', 'sci', 'post:!', 'mod', 'op:mod'], ['%', 'sci', 'post:%'],
+      ['π', 'sci', 'const:π'], ['e', 'sci', 'const:e'], ['1/x', 'sci', 'post:⁻¹', '|x|', 'fn:abs'], ['x!', 'sci', 'post:!', 'mod', 'op:mod'], ['%', 'sci', 'post:%', 'Ran#', 'rand'],
       ['AC', 'fn', 'clear'], ['(', 'fn', 'lparen'], [')', 'fn', 'rparen'], ['⌫', 'fn', 'backspace'], ['÷', 'op', 'op:/'],
       ['7', 'num', '7'], ['8', 'num', '8'], ['9', 'num', '9'], ['±', 'fn', 'negate'], ['×', 'op', 'op:*'],
       ['4', 'num', '4'], ['5', 'num', '5'], ['6', 'num', '6'], ['EE', 'fn', 'ee'], ['−', 'op', 'op:-'],
@@ -355,6 +362,7 @@
     const ARIA = {
       '⌫': 'Backspace', 'AC': 'Clear', '2nd': 'Second functions', 'DEG': 'Degrees or radians', 'x²': 'Square', 'xʸ': 'Power',
       '√': 'Square root', '1/x': 'Reciprocal', 'x!': 'Factorial', 'EE': 'Exponent', '±': 'Change sign', 'π': 'Pi', 'e': 'e',
+      'Ran#': 'Random number',
     };
 
     const TAPE_KEY = 'calc:tape';
@@ -487,7 +495,7 @@
           '.': 'point', ',': 'point', '+': 'op:+', '-': 'op:-', '*': 'op:*', 'x': 'op:*', 'X': 'op:*', '/': 'op:/', '^': 'op:^',
           '(': 'lparen', ')': 'rparen', '%': 'post:%', '!': 'post:!', 'Enter': 'equals', '=': 'equals', 'Backspace': 'backspace',
           's': 'fn:sin', 'c': 'fn:cos', 't': 'fn:tan', 'l': 'fn:ln', 'g': 'fn:log', 'r': 'fn:sqrt', 'q': 'post:²',
-          'p': 'const:π', 'e': 'const:e', 'E': 'ee', 'a': 'ans', 'd': 'deg', 'n': 'second', 'h': 'toggleTape', 'H': 'toggleTape',
+          'p': 'const:π', 'e': 'const:e', 'E': 'ee', 'a': 'ans', '#': 'rand', 'd': 'deg', 'n': 'second', 'h': 'toggleTape', 'H': 'toggleTape',
         };
         this.onKey = (e) => {
           if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -520,6 +528,7 @@
         else if (action === 'lparen') c.lparen();
         else if (action === 'rparen') c.rparen();
         else if (action === 'ans') c.ansKey();
+        else if (action === 'rand') c.random();
         else if (action === 'deg') { c.deg = !c.deg; store(DEG_KEY, c.deg); }
         else if (kind === 'op') c.op(arg);
         else if (kind === 'fn') c.fn(arg);
