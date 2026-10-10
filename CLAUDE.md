@@ -48,8 +48,9 @@ calculator.html   a scientific calculator, the same shape: one file, a
                   runner (`<dash-widget>`) over terrain generated from a
                   seed per attempt — steps, pits, spikes, a skyline — with a
                   whole jump's worth of flat after every feature so it is
-                  always fair: tap to start, tap to jump, best under
-                  `calc:dash`; it draws only while a run is on.
+                  always fair: tap the widget, the ▲ button top-right or
+                  space to start and to jump, best under `calc:dash`; it
+                  draws only while a run is on.
 ```
 
 Inside the hike app, roughly in the order a walker meets them:

@@ -25,7 +25,10 @@
       display: flex; justify-content: space-between; align-items: center; flex: none;
       padding: max(8px, env(safe-area-inset-top)) 8px 0;
     }
-    .top .left { display: flex; align-items: center; gap: 8px; }
+    .top .left, .top .right { display: flex; align-items: center; gap: 8px; }
+    /* The jump button: the cube's colour, and a size a thumb finds without looking. */
+    .top button.jump { background: var(--eq); color: #1b2620; width: 52px; font-size: 20px; font-weight: 700; line-height: 36px; }
+    .top button.jump:active { background: var(--eq-on); transform: scale(.94); }
     dash-widget { display: block; width: 128px; height: 52px; }
     .top a, .top button {
       width: 36px; height: 36px; border-radius: 18px; border: 0; padding: 0; cursor: pointer;
@@ -44,7 +47,10 @@
       <a href="index.html" aria-label="Back to Slow Navigator">✕</a>
       <dash-widget></dash-widget>
     </div>
-    <button id="tapeBtn" aria-label="Show history" title="History">≡</button>
+    <div class="right">
+      <button id="jumpBtn" class="jump" aria-label="Jump" title="Jump (space)">▲</button>
+      <button id="tapeBtn" aria-label="Show history" title="History">≡</button>
+    </div>
   </div>
   <slow-calc></slow-calc>
 
@@ -860,6 +866,11 @@
       }
     }
     customElements.define('dash-widget', DashWidget);
+    // pointerdown, not click: a jump has to happen on the press, not the release.
+    document.getElementById('jumpBtn').addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      document.querySelector('dash-widget').tap();
+    });
     document.getElementById('tapeBtn').addEventListener('click', () => {
       document.querySelector('slow-calc').press('toggleTape');
     });
