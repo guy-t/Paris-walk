@@ -49,8 +49,10 @@ calculator.html   a scientific calculator, the same shape: one file, a
                   seed per attempt — steps, pits, spikes, a skyline — with a
                   whole jump's worth of flat after every feature so it is
                   always fair: tap the widget, the ▲ button top-right or
-                  space to start and to jump, best under `calc:dash`; it
-                  draws only while a run is on.
+                  space to start and to jump, hold to keep jumping, best
+                  under `calc:dash`; it draws only while a run is on and
+                  pauses under the history panel. Writing two things
+                  together (2π) binds tighter than ÷, as on a Casio.
 ```
 
 Inside the hike app, roughly in the order a walker meets them:

@@ -31,7 +31,7 @@
     .top button.jump:active { background: var(--eq-on); transform: scale(.94); }
     dash-widget { display: block; width: 176px; height: 72px; }
     .top a, .top button {
-      width: 36px; height: 36px; border-radius: 18px; border: 0; padding: 0; cursor: pointer;
+      width: 36px; height: 36px; border-radius: 18px; border: 0; padding: 0; cursor: pointer; touch-action: manipulation;
       background: rgba(255, 255, 255, .12); color: #fff; font-size: 17px; line-height: 36px; text-align: center;
       text-decoration: none; font-family: inherit;
     }
@@ -134,7 +134,7 @@
     // A minus that is a sign sits against its number: "5 − −2", "−3²".
     const show = (tokens) => tokens.map((t, i) => {
       switch (t.t) {
-        case 'num': return t.v.replace('e', 'ᴇ').replace(/-/g, '−');
+        case 'num': return t.v.replace('e+', 'e').replace('e', 'ᴇ').replace(/-/g, '−');
         case 'op': return t.v === '-' && !endsOperand(tokens[i - 1]) ? '−' : OP_LABEL[t.v];
         case 'fn': return FN_LABEL[t.v] + '(';
         case 'lp': return '(';
@@ -147,7 +147,7 @@
     }).join('').replace(/\s+/g, ' ').trim();
 
     // Recursive descent, lowest precedence first:
-    //   + −  <  × ÷ mod and writing two things together  <  unary −  <  ^ ˣ√ (right)  <  postfix  <  atoms
+    //   + −  <  × ÷ mod  <  writing two things together  <  unary −  <  ^ ˣ√ (right)  <  postfix  <  atoms
     // so −3² is −9 and 2^3^2 is 512, as on a Casio. Brackets left open at
     // the end are closed for free.
     const evaluate = (tokens, deg, ans) => {
@@ -160,19 +160,23 @@
         return v;
       };
       const term = () => {
-        let v = unary();
+        let v = juxta();
         for (;;) {
           const t = peek();
-          if (isOp(t, '*', '/', 'mod')) {
-            i++;
-            const r = unary();
-            if (t.v === '*') v = v * r;
-            else if (r === 0) fail("Can't divide by 0");
-            else v = t.v === '/' ? v / r : v - r * Math.floor(v / r);
-          } else if (startsOperand(t)) {
-            v = v * unary();   // 2π, 3(4 + 5), 2sin(30)
-          } else return v;
+          if (!isOp(t, '*', '/', 'mod')) return v;
+          i++;
+          const r = juxta();
+          if (t.v === '*') v = v * r;
+          else if (r === 0) fail("Can't divide by 0");
+          else v = t.v === '/' ? v / r : v - r * Math.floor(v / r);
         }
+      };
+      // Writing two things together multiplies — 2π, 3(4 + 5), 2sin(30) —
+      // and binds tighter than ÷, so 1 ÷ 2π is 1 ÷ (2π), as on a Casio.
+      const juxta = () => {
+        let v = unary();
+        while (startsOperand(peek())) v = v * unary();
+        return v;
       };
       const unary = () => {
         if (isOp(peek(), '-')) { i++; return -unary(); }
@@ -218,10 +222,10 @@
         this.clear();
       }
 
-      clear() { this.tokens = []; this.result = null; this.error = null; this.evaluated = false; }
+      clear() { this.tokens = []; this.result = null; this.error = null; this.evaluated = false; this.recalled = false; }
 
       get last() { return this.tokens[this.tokens.length - 1]; }
-      get expression() { return show(this.tokens, this.deg) + (this.evaluated ? ' =' : ''); }
+      get expression() { return show(this.tokens) + (this.evaluated && !this.recalled ? ' =' : ''); }
 
       // What the big line shows, and how: the answer after "=", an error,
       // or a muted preview of where the expression has got to.
@@ -239,8 +243,9 @@
       begin(continues) {
         this.error = null;
         if (!this.evaluated) return;
-        this.tokens = continues ? [{ t: 'ans' }] : [];
-        this.result = null; this.evaluated = false;
+        const carry = this.result === this.ans ? { t: 'ans' } : { t: 'num', v: String(this.result) };
+        this.tokens = continues ? [carry] : [];
+        this.result = null; this.evaluated = false; this.recalled = false;
       }
 
       push(token) { this.tokens.push(token); }
@@ -354,8 +359,9 @@
         return `${show(this.tokens)} = ${fmt(this.result)}`;
       }
 
-      // The tape gives back a result to carry on from.
-      use(n) { this.clear(); this.tokens = [{ t: 'num', v: String(n) }]; }
+      // The tape gives back a result to carry on from: an operator continues
+      // from it, a digit starts afresh, as after "=".
+      use(n) { this.clear(); this.tokens = [{ t: 'num', v: String(n) }]; this.result = n; this.evaluated = true; this.recalled = true; }
     }
 
     // ---- The component -------------------------------------------------------
@@ -423,7 +429,7 @@
             button {
               font: inherit; font-size: 24px; border: 0; border-radius: 14px; color: var(--ink);
               background: var(--key); height: clamp(42px, 7.6vh, 60px); cursor: pointer; padding: 0;
-              transition: transform .06s;
+              transition: transform .06s; touch-action: manipulation;
             }
             button:active { transform: scale(.96); }
             button.num:active { background: var(--key-on); }
@@ -608,7 +614,7 @@
       }
 
       showTape(open) {
-        if (open) this.renderTape();
+        if (open) { this.renderTape(); document.querySelector('dash-widget')?.pause(); }
         this.$('.tape').classList.toggle('open', open);
       }
     }
@@ -649,18 +655,25 @@
         this.attempt = 0;
         this.state = 'idle';
         this.reset(1);
-        this.canvas.addEventListener('pointerdown', (e) => { e.preventDefault(); this.tap(); });
+        this.held = false; this.buffer = -Infinity; this.particles = [];
+        this.canvas.addEventListener('pointerdown', (e) => { e.preventDefault(); this.press(); });
         this.onKey = (e) => {
           if (e.key !== ' ' || e.ctrlKey || e.metaKey || e.altKey) return;
           e.preventDefault();
-          this.tap();
+          if (!e.repeat) this.press();
         };
-        this.onHide = () => { if (document.hidden && this.state === 'running') { this.state = 'paused'; this.draw(); } };
+        this.onKeyUp = (e) => { if (e.key === ' ') this.release(); };
+        this.onRelease = () => this.release();
+        this.onHide = () => { if (document.hidden) this.pause(); };
         this.loop = this.loop.bind(this);
+        this.burst = this.burst.bind(this);
       }
 
       connectedCallback() {
         window.addEventListener('keydown', this.onKey);
+        window.addEventListener('keyup', this.onKeyUp);
+        window.addEventListener('pointerup', this.onRelease);
+        window.addEventListener('pointercancel', this.onRelease);
         document.addEventListener('visibilitychange', this.onHide);
         this.ro = new ResizeObserver(() => this.fit());
         this.ro.observe(this);
@@ -668,9 +681,19 @@
       }
       disconnectedCallback() {
         window.removeEventListener('keydown', this.onKey);
+        window.removeEventListener('keyup', this.onKeyUp);
+        window.removeEventListener('pointerup', this.onRelease);
+        window.removeEventListener('pointercancel', this.onRelease);
         document.removeEventListener('visibilitychange', this.onHide);
         this.ro.disconnect();
       }
+
+      // Holding the button or the bar keeps the cube jumping as it lands,
+      // and a press a moment before landing still counts — both as in the
+      // real thing, and both what make a run feel fair at speed.
+      press() { this.held = true; this.tap(); }
+      release() { this.held = false; }
+      pause() { if (this.state === 'running') { this.state = 'paused'; this.draw(); } }
 
       // The world is always 52 units tall, whatever size the widget is
       // drawn at, so a bigger widget shows a bigger cube, not more ground.
@@ -692,6 +715,7 @@
         this.seed = seed; this.rng = seeded(seed);
         this.y = 0; this.vy = 0; this.rot = 0; this.score = 0; this.speed = 100; this.dist = 0;
         this.cols = []; this.col0 = 0; this.level = 0; this.cam = 0;
+        this.particles = []; this.newBest = false; this.buffer = -Infinity;
         for (let i = 0; i < 16; i++) this.cols.push({ h: 0, spike: false, feat: false, passed: false });
         // The skyline: two layers of hills, each a sum of three seeded waves.
         this.hills = [0, 1].map(() => [0, 1, 2].map((k) => ({
@@ -735,9 +759,11 @@
       }
 
       // ---- The run ---------------------------------------------------------
+      jump() { this.vy = 230; this.rot = 0; this.onGround = false; this.buffer = -Infinity; }
+
       tap() {
         if (this.state === 'running') {
-          if (this.onGround) { this.vy = 230; this.rot = 0; this.onGround = false; }
+          if (this.onGround) this.jump(); else this.buffer = performance.now();
           return;
         }
         if (this.state === 'paused') { this.state = 'running'; this.last = performance.now(); requestAnimationFrame(this.loop); return; }
@@ -783,6 +809,7 @@
         if (this.y <= gh) {
           if (this.y < gh - 4) { this.die(); return; }     // ran into the side of a step
           this.y = gh; this.vy = 0; this.rot = 0; this.onGround = true;
+          if (this.held || performance.now() - this.buffer < 120) this.jump();   // held, or pressed just before landing
         } else if (this.y === gh) {
           this.onGround = true;
         } else if (gh === -Infinity && this.y < -CUBE * 1.5) { this.die(); return; }   // down a pit
@@ -803,8 +830,27 @@
 
       die() {
         this.state = 'dead';
-        if (this.score > this.best) { this.best = this.score; store(DASH_KEY, this.best); }
+        this.newBest = this.score > this.best && this.score > 0;
+        if (this.newBest) { this.best = this.score; store(DASH_KEY, this.best); }
         if (navigator.vibrate) navigator.vibrate(20);
+        // The cube goes to pieces: a dozen bits of it, flying, for half a second.
+        const cx = PX + CUBE / 2, cy = this.y + CUBE / 2;
+        this.particles = Array.from({ length: 12 }, (_, k) => {
+          const a = (k / 12) * Math.PI * 2 + Math.random() * 0.5, sp = 60 + Math.random() * 90;
+          return { x: cx, y: cy, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp + 60, life: 0.5 };
+        });
+        this.lastBurst = performance.now();
+        requestAnimationFrame(this.burst);
+      }
+
+      burst(now) {
+        if (this.state !== 'dead' || this.particles.length === 0) return;
+        const dt = Math.min(0.05, (now - this.lastBurst) / 1000);
+        this.lastBurst = now;
+        for (const p of this.particles) { p.x += p.vx * dt; p.y += p.vy * dt; p.vy -= 400 * dt; p.life -= dt; }
+        this.particles = this.particles.filter((p) => p.life > 0);
+        this.draw();
+        if (this.particles.length) requestAnimationFrame(this.burst);
       }
 
       // ---- Drawing -----------------------------------------------------------
@@ -847,23 +893,34 @@
           }
         }
 
-        // The cube
-        c.save();
-        c.translate(PX + CUBE / 2, base - CUBE / 2 - this.y);
-        c.rotate(this.rot);
-        c.fillStyle = this.state === 'dead' ? '#e2533b' : '#e8a33a';
-        c.fillRect(-CUBE / 2, -CUBE / 2, CUBE, CUBE);
-        c.fillStyle = '#1b2620'; c.fillRect(-CUBE / 2 + 3, -CUBE / 2 + 3, 4, 4); c.fillRect(1, -CUBE / 2 + 3, 4, 4);
-        c.fillRect(-CUBE / 2 + 3, 2, CUBE - 6, 3);
-        c.strokeStyle = '#1b2620'; c.lineWidth = 1.5; c.strokeRect(-CUBE / 2, -CUBE / 2, CUBE, CUBE);
-        c.restore();
+        // The cube — or, just after a crash, its pieces.
+        if (this.particles.length) {
+          for (const p of this.particles) {
+            c.globalAlpha = Math.max(0, p.life / 0.5);
+            c.fillStyle = '#e8a33a'; c.fillRect(p.x - 2, base - p.y - 2, 4, 4);
+          }
+          c.globalAlpha = 1;
+        } else {
+          c.save();
+          c.translate(PX + CUBE / 2, base - CUBE / 2 - this.y);
+          c.rotate(this.rot);
+          c.fillStyle = this.state === 'dead' ? '#e2533b' : '#e8a33a';
+          c.fillRect(-CUBE / 2, -CUBE / 2, CUBE, CUBE);
+          c.fillStyle = '#1b2620'; c.fillRect(-CUBE / 2 + 3, -CUBE / 2 + 3, 4, 4); c.fillRect(1, -CUBE / 2 + 3, 4, 4);
+          c.fillRect(-CUBE / 2 + 3, 2, CUBE - 6, 3);
+          c.strokeStyle = '#1b2620'; c.lineWidth = 1.5; c.strokeRect(-CUBE / 2, -CUBE / 2, CUBE, CUBE);
+          c.restore();
+        }
 
         // Words
         c.font = '600 10px -apple-system, Segoe UI, Roboto, sans-serif';
         c.textBaseline = 'top'; c.textAlign = 'right';
         c.fillStyle = '#9fb0a6';
         if (this.state === 'idle') { c.fillText(this.best ? `best ${this.best} · tap ▶` : 'tap ▶', w - 5, 5); }
-        else if (this.state === 'dead') { c.fillStyle = '#e2533b'; c.fillText(`✕ ${this.score} · best ${this.best}`, w - 5, 5); }
+        else if (this.state === 'dead') {
+          c.fillStyle = this.newBest ? '#e8a33a' : '#e2533b';
+          c.fillText(this.newBest ? `★ new best ${this.score}` : `✕ ${this.score} · best ${this.best}`, w - 5, 5);
+        }
         else if (this.state === 'paused') { c.fillText(`paused · ${this.score}`, w - 5, 5); }
         else { c.fillStyle = '#f3f7f4'; c.fillText(String(this.score), w - 5, 5); c.textAlign = 'left'; c.fillStyle = '#9fb0a6'; c.fillText(`#${this.attempt}`, 5, 5); }
       }
@@ -872,7 +929,7 @@
     // pointerdown, not click: a jump has to happen on the press, not the release.
     document.getElementById('jumpBtn').addEventListener('pointerdown', (e) => {
       e.preventDefault();
-      document.querySelector('dash-widget').tap();
+      document.querySelector('dash-widget').press();
     });
     document.getElementById('tapeBtn').addEventListener('click', () => {
       document.querySelector('slow-calc').press('toggleTape');
