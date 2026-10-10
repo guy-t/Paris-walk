@@ -45,7 +45,7 @@ calculator.html   a scientific calculator, the same shape: one file, a
                   Ans, Ran#, a 2nd layer. 15 significant digits, a tape of past
                   sums in localStorage under `calc:tape`, DEG/RAD under
                   `calc:deg`. In its top-left corner a Geometry Dash-style
-                  runner (`<dash-widget>`) over terrain generated from a
+                  runner (`<dash-widget>`, 176×72, a 52-unit world scaled to fit) over terrain generated from a
                   seed per attempt — steps, pits, spikes, a skyline — with a
                   whole jump's worth of flat after every feature so it is
                   always fair: tap the widget, the ▲ button top-right or
