@@ -25,6 +25,8 @@
       display: flex; justify-content: space-between; align-items: center; flex: none;
       padding: max(8px, env(safe-area-inset-top)) 8px 0;
     }
+    .top .left { display: flex; align-items: center; gap: 8px; }
+    dash-widget { display: block; width: 128px; height: 52px; }
     .top a, .top button {
       width: 36px; height: 36px; border-radius: 18px; border: 0; padding: 0; cursor: pointer;
       background: rgba(255, 255, 255, .12); color: #fff; font-size: 17px; line-height: 36px; text-align: center;
@@ -38,7 +40,10 @@
 
 <body>
   <div class="top">
-    <a href="index.html" aria-label="Back to Slow Navigator">✕</a>
+    <div class="left">
+      <a href="index.html" aria-label="Back to Slow Navigator">✕</a>
+      <dash-widget></dash-widget>
+    </div>
     <button id="tapeBtn" aria-label="Show history" title="History">≡</button>
   </div>
   <slow-calc></slow-calc>
@@ -603,6 +608,167 @@
     }
 
     customElements.define('slow-calc', SlowCalc);
+
+    // ---- The runner in the corner ----------------------------------------
+    // A cube that runs and jumps over spikes, Geometry-Dash fashion: one
+    // tap to start, tap to jump, tap to try again. It only draws while a
+    // run is on, so an idle widget costs nothing.
+    const DASH_KEY = 'calc:dash';
+    class DashWidget extends HTMLElement {
+      constructor() {
+        super();
+        const root = this.attachShadow({ mode: 'open' });
+        root.innerHTML = `
+          <style>
+            :host { display: block; border-radius: 10px; overflow: hidden; background: #101a15; cursor: pointer;
+              -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+            canvas { display: block; width: 100%; height: 100%; }
+          </style>
+          <canvas role="button" aria-label="Tap to jump" tabindex="0"></canvas>`;
+        this.canvas = root.querySelector('canvas');
+        this.ctx = this.canvas.getContext('2d');
+        this.best = +stored(DASH_KEY, 0) || 0;
+        this.attempt = 0;
+        this.state = 'idle';
+        this.reset();
+        this.canvas.addEventListener('pointerdown', (e) => { e.preventDefault(); this.tap(); });
+        this.onKey = (e) => {
+          if (e.key !== ' ' || e.ctrlKey || e.metaKey || e.altKey) return;
+          e.preventDefault();
+          this.tap();
+        };
+        this.onHide = () => { if (document.hidden && this.state === 'running') { this.state = 'paused'; this.draw(); } };
+        this.loop = this.loop.bind(this);
+      }
+
+      connectedCallback() {
+        window.addEventListener('keydown', this.onKey);
+        document.addEventListener('visibilitychange', this.onHide);
+        this.ro = new ResizeObserver(() => this.fit());
+        this.ro.observe(this);
+        this.fit();
+      }
+      disconnectedCallback() {
+        window.removeEventListener('keydown', this.onKey);
+        document.removeEventListener('visibilitychange', this.onHide);
+        this.ro.disconnect();
+      }
+
+      fit() {
+        const dpr = window.devicePixelRatio || 1;
+        const r = this.getBoundingClientRect();
+        this.w = Math.max(1, Math.round(r.width)); this.h = Math.max(1, Math.round(r.height));
+        this.canvas.width = this.w * dpr; this.canvas.height = this.h * dpr;
+        this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        this.draw();
+      }
+
+      // World units are CSS pixels. The cube is 14 wide and runs at x = 22;
+      // the ground is 10 up from the bottom.
+      reset() {
+        this.y = 0; this.vy = 0; this.rot = 0; this.score = 0; this.speed = 95;
+        this.spikes = []; this.nextAt = 150; this.dist = 0;
+      }
+
+      tap() {
+        if (this.state === 'running') {
+          if (this.y === 0) { this.vy = 230; this.rot = 0; }
+          return;
+        }
+        if (this.state === 'paused') { this.state = 'running'; this.last = performance.now(); requestAnimationFrame(this.loop); return; }
+        this.reset();
+        this.attempt++;
+        this.state = 'running';
+        this.last = performance.now();
+        requestAnimationFrame(this.loop);
+      }
+
+      loop(now) {
+        if (this.state !== 'running') return;
+        const dt = Math.min(0.05, (now - this.last) / 1000);
+        this.last = now;
+        this.step(dt);
+        this.draw();
+        if (this.state === 'running') requestAnimationFrame(this.loop);
+      }
+
+      step(dt) {
+        const G = 1000;   // with a 230 px/s jump: 0.46 s in the air, 26 px high, 40 px of ground at the start
+        const move = this.speed * dt;
+        this.dist += move;
+        // Gravity, and a quarter turn in the air like the real thing.
+        if (this.y > 0 || this.vy > 0) {
+          this.y += this.vy * dt; this.vy -= G * dt;
+          this.rot += (Math.PI / 2) * dt / 0.46;
+          if (this.y <= 0) { this.y = 0; this.vy = 0; this.rot = 0; }
+        }
+        for (const s of this.spikes) s.x -= move;
+        // New spikes arrive from the right; a gap is always long enough to land in.
+        if (this.dist >= this.nextAt) {
+          const n = this.score >= 3 && Math.random() < 0.3 ? 2 : 1;   // doubles once the walker has the rhythm
+          this.spikes.push({ x: this.w + 4, n, passed: false });
+          this.nextAt = this.dist + 70 + Math.random() * 60 + n * 10;
+        }
+        const px = 22, size = 14, ground = this.h - 10;
+        const top = ground - size - this.y;
+        for (const s of this.spikes) {
+          const w = 10 * s.n, h = 12;
+          if (!s.passed && s.x + w < px) { s.passed = true; this.score++; this.speed = Math.min(160, this.speed + 2.5); }
+          // The spike's hit box is its upper half, so a close shave is a shave.
+          const hit = px + 2 < s.x + w - 3 && px + size - 2 > s.x + 3 && top + size - 1 > ground - h + 5;
+          if (hit) { this.die(); return; }
+        }
+        this.spikes = this.spikes.filter((s) => s.x > -30);
+      }
+
+      die() {
+        this.state = 'dead';
+        if (this.score > this.best) { this.best = this.score; store(DASH_KEY, this.best); }
+        if (navigator.vibrate) navigator.vibrate(20);
+      }
+
+      draw() {
+        const c = this.ctx, w = this.w, h = this.h, ground = h - 10;
+        c.clearRect(0, 0, w, h);
+        const bg = c.createLinearGradient(0, 0, 0, h);
+        bg.addColorStop(0, '#182a34'); bg.addColorStop(1, '#0e1a20');
+        c.fillStyle = bg; c.fillRect(0, 0, w, h);
+        // Ground, with a strip that scrolls so the run reads as motion.
+        c.fillStyle = '#1c3a30'; c.fillRect(0, ground, w, h - ground);
+        c.fillStyle = '#2f4f3e';
+        const off = -(this.dist % 16);
+        for (let x = off; x < w; x += 16) c.fillRect(x, ground, 8, 2);
+        c.fillStyle = '#9fd9c4'; c.fillRect(0, ground, w, 1);
+        // Spikes
+        for (const s of this.spikes) {
+          for (let i = 0; i < s.n; i++) {
+            const x = s.x + i * 10;
+            c.beginPath(); c.moveTo(x, ground); c.lineTo(x + 5, ground - 12); c.lineTo(x + 10, ground); c.closePath();
+            c.fillStyle = '#dfe8e2'; c.fill(); c.strokeStyle = '#1b2620'; c.lineWidth = 1; c.stroke();
+          }
+        }
+        // The cube
+        const px = 22, size = 14;
+        c.save();
+        c.translate(px + size / 2, ground - size / 2 - this.y);
+        c.rotate(this.rot);
+        c.fillStyle = this.state === 'dead' ? '#e2533b' : '#e8a33a';
+        c.fillRect(-size / 2, -size / 2, size, size);
+        c.fillStyle = '#1b2620'; c.fillRect(-size / 2 + 3, -size / 2 + 3, 4, 4); c.fillRect(1, -size / 2 + 3, 4, 4);
+        c.fillRect(-size / 2 + 3, 2, size - 6, 3);
+        c.strokeStyle = '#1b2620'; c.lineWidth = 1.5; c.strokeRect(-size / 2, -size / 2, size, size);
+        c.restore();
+        // Words
+        c.font = '600 10px -apple-system, Segoe UI, Roboto, sans-serif';
+        c.textBaseline = 'top'; c.textAlign = 'right';
+        c.fillStyle = '#9fb0a6';
+        if (this.state === 'idle') { c.fillText(this.best ? `best ${this.best} · tap ▶` : 'tap ▶', w - 5, 5); }
+        else if (this.state === 'dead') { c.fillStyle = '#e2533b'; c.fillText(`✕ ${this.score} · best ${this.best}`, w - 5, 5); }
+        else if (this.state === 'paused') { c.fillText(`paused · ${this.score}`, w - 5, 5); }
+        else { c.fillStyle = '#f3f7f4'; c.fillText(String(this.score), w - 5, 5); c.textAlign = 'left'; c.fillStyle = '#9fb0a6'; c.fillText(`#${this.attempt}`, 5, 5); }
+      }
+    }
+    customElements.define('dash-widget', DashWidget);
     document.getElementById('tapeBtn').addEventListener('click', () => {
       document.querySelector('slow-calc').press('toggleTape');
     });

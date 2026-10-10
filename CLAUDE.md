@@ -44,7 +44,9 @@ calculator.html   a scientific calculator, the same shape: one file, a
                   degrees or radians, logs, powers, roots, factorial, π, e,
                   Ans, Ran#, a 2nd layer. 15 significant digits, a tape of past
                   sums in localStorage under `calc:tape`, DEG/RAD under
-                  `calc:deg`.
+                  `calc:deg`. In its top-left corner a Geometry Dash-style
+                  runner (`<dash-widget>`): tap to start, tap to jump, best
+                  under `calc:dash`; it draws only while a run is on.
 ```
 
 Inside the hike app, roughly in the order a walker meets them:
