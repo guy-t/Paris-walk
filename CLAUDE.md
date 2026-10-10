@@ -45,8 +45,11 @@ calculator.html   a scientific calculator, the same shape: one file, a
                   Ans, Ran#, a 2nd layer. 15 significant digits, a tape of past
                   sums in localStorage under `calc:tape`, DEG/RAD under
                   `calc:deg`. In its top-left corner a Geometry Dash-style
-                  runner (`<dash-widget>`): tap to start, tap to jump, best
-                  under `calc:dash`; it draws only while a run is on.
+                  runner (`<dash-widget>`) over terrain generated from a
+                  seed per attempt — steps, pits, spikes, a skyline — with a
+                  whole jump's worth of flat after every feature so it is
+                  always fair: tap to start, tap to jump, best under
+                  `calc:dash`; it draws only while a run is on.
 ```
 
 Inside the hike app, roughly in the order a walker meets them:
