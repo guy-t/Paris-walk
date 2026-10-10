@@ -36,6 +36,8 @@ packages/ui       MapView, ElevationProfile, Sheet, StatTile, Toast, and the
 apps/web          one Vite app, one HTML entry per guide, two build targets.
 apps/mobile       Capacitor shell (Android + iOS) wrapping the same build.
 *.html (root)     the original single-file apps, STILL LIVE. Do not delete.
+game.html         Trail Jumper, a small canvas platformer. Not a navigator —
+                  one file, no build, copied to Pages beside the others.
 ```
 
 Inside the hike app, roughly in the order a walker meets them:
