@@ -38,6 +38,21 @@ apps/mobile       Capacitor shell (Android + iOS) wrapping the same build.
 *.html (root)     the original single-file apps, STILL LIVE. Do not delete.
 game.html         Trail Jumper, a small canvas platformer. Not a navigator —
                   one file, no build, copied to Pages beside the others.
+calculator.html   a scientific calculator, the same shape: one file, a
+                  native web component, no build. An expression with
+                  precedence and brackets (2 + 3 × 4 = 14, −3² = −9), trig in
+                  degrees or radians, logs, powers, roots, factorial, π, e,
+                  Ans, Ran#, a 2nd layer. 15 significant digits, a tape of past
+                  sums in localStorage under `calc:tape`, DEG/RAD under
+                  `calc:deg`. In its top-left corner a Geometry Dash-style
+                  runner (`<dash-widget>`, 176×72, a 52-unit world scaled to fit) over terrain generated from a
+                  seed per attempt — steps, pits, spikes, a skyline — with a
+                  whole jump's worth of flat after every feature so it is
+                  always fair: tap the widget, the ▲ button top-right or
+                  space to start and to jump, hold to keep jumping, best
+                  under `calc:dash`; it draws only while a run is on and
+                  pauses under the history panel. Writing two things
+                  together (2π) binds tighter than ÷, as on a Casio.
 ```
 
 Inside the hike app, roughly in the order a walker meets them:

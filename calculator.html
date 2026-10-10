@@ -1,0 +1,940 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#1b2620">
+  <title>Calculator</title>
+  <style>
+    :root {
+      --bg: #1b2620; --ink: #f3f7f4; --muted: #9fb0a6;
+      --key: rgba(255, 255, 255, .10); --key-on: rgba(255, 255, 255, .28);
+      --op: #2f4f3e; --op-on: #3f6a54; --sci: rgba(255, 255, 255, .05);
+      --eq: #e8a33a; --eq-on: #f2b858; --warn: #e2533b;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      background: var(--bg); color: var(--ink); -webkit-tap-highlight-color: transparent;
+      user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+      display: flex; flex-direction: column;
+    }
+    .top {
+      display: flex; justify-content: space-between; align-items: center; flex: none;
+      padding: max(8px, env(safe-area-inset-top)) 8px 0;
+    }
+    .top .left, .top .right { display: flex; align-items: center; gap: 8px; }
+    /* The jump button: the cube's colour, and a size a thumb finds without looking. */
+    .top button.jump { background: var(--eq); color: #1b2620; width: 52px; font-size: 20px; font-weight: 700; line-height: 36px; }
+    .top button.jump:active { background: var(--eq-on); transform: scale(.94); }
+    dash-widget { display: block; width: 176px; height: 72px; }
+    .top a, .top button {
+      width: 36px; height: 36px; border-radius: 18px; border: 0; padding: 0; cursor: pointer; touch-action: manipulation;
+      background: rgba(255, 255, 255, .12); color: #fff; font-size: 17px; line-height: 36px; text-align: center;
+      text-decoration: none; font-family: inherit;
+    }
+    /* The host's own display wins over the shadow's :host rule, so the
+       column is laid out here: the screen grows, the keys keep their size. */
+    slow-calc { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  </style>
+</head>
+
+<body>
+  <div class="top">
+    <div class="left">
+      <a href="index.html" aria-label="Back to Slow Navigator">✕</a>
+      <dash-widget></dash-widget>
+    </div>
+    <div class="right">
+      <button id="jumpBtn" class="jump" aria-label="Jump" title="Jump (space)">▲</button>
+      <button id="tapeBtn" aria-label="Show history" title="History">≡</button>
+    </div>
+  </div>
+  <slow-calc></slow-calc>
+
+  <script>
+    'use strict';
+
+    // ---- Numbers ---------------------------------------------------------
+    // Every result is rounded to 15 significant digits before it is shown or
+    // reused — as many as a double can honestly carry — so 0.1 + 0.2 reads
+    // 0.3 and sin(30°) reads 0.5 rather than 0.49999999999999994.
+    const SIG = 15;
+    const PLAIN_MAX = 1e15;   // written out in full below this, as a power of ten above
+    const round = (n) => (Number.isFinite(n) && n !== 0) ? +n.toPrecision(SIG) : n;
+
+    // Plain up to 15 digits, exponent beyond, no trailing zeros, "−" not "-".
+    const fmt = (n) => {
+      if (!Number.isFinite(n)) return 'Error';
+      const abs = Math.abs(n);
+      let s = (abs !== 0 && (abs >= PLAIN_MAX || abs < 1e-9)) ? n.toExponential(SIG - 1) : n.toPrecision(SIG);
+      if (!s.includes('e') && s.includes('.')) s = s.replace(/\.?0+$/, '');
+      if (s.includes('e')) s = s.replace(/\.?0+e/, 'e').replace('e+', 'e').replace('e', 'ᴇ');
+      return s.replace(/-/g, '−');
+    };
+
+    class CalcError extends Error { }
+    const fail = (msg) => { throw new CalcError(msg); };
+    const INCOMPLETE = 'incomplete';   // a trailing operator: nothing to show yet, not a fault
+
+    // ---- Functions -------------------------------------------------------
+    // Trig in degrees handles the exact points itself: sin 180° is 0, not
+    // 1.2e-16, and tan 90° is undefined rather than 1.6e16.
+    const snap = (x) => Math.abs(x) < 1e-15 ? 0 : x;
+    const sinD = (d) => {
+      const r = ((d % 360) + 360) % 360;
+      if (r % 180 === 0) return 0;
+      if (r === 90) return 1;
+      if (r === 270) return -1;
+      return Math.sin(d * Math.PI / 180);
+    };
+    const tanD = (d) => {
+      const r = ((d % 360) + 360) % 360;
+      if (r % 180 === 0) return 0;
+      if (r === 90 || r === 270) return NaN;
+      return sinD(d) / sinD(d + 90);
+    };
+    const factorial = (n) => {
+      if (n < 0 || n !== Math.floor(n)) return NaN;
+      if (n > 170) return Infinity;
+      let f = 1;
+      for (let i = 2; i <= n; i++) f *= i;
+      return f;
+    };
+    const FN = {
+      sin: (x, deg) => deg ? sinD(x) : snap(Math.sin(x)),
+      cos: (x, deg) => deg ? sinD(x + 90) : snap(Math.cos(x)),
+      tan: (x, deg) => deg ? tanD(x) : snap(Math.tan(x)),
+      asin: (x, deg) => Math.asin(x) * (deg ? 180 / Math.PI : 1),
+      acos: (x, deg) => Math.acos(x) * (deg ? 180 / Math.PI : 1),
+      atan: (x, deg) => Math.atan(x) * (deg ? 180 / Math.PI : 1),
+      ln: (x) => x <= 0 ? NaN : Math.log(x), log: (x) => x <= 0 ? NaN : Math.log10(x),
+      sqrt: (x) => Math.sqrt(x), cbrt: (x) => Math.cbrt(x),
+      exp: (x) => Math.exp(x), pow10: (x) => Math.pow(10, x), abs: (x) => Math.abs(x),
+    };
+    const FN_LABEL = {
+      sin: 'sin', cos: 'cos', tan: 'tan', asin: 'sin⁻¹', acos: 'cos⁻¹', atan: 'tan⁻¹',
+      ln: 'ln', log: 'log', sqrt: '√', cbrt: '∛', exp: 'e^', pow10: '10^', abs: 'abs',
+    };
+    const POST = {
+      '!': factorial, '%': (x) => x / 100, '²': (x) => x * x, '³': (x) => x * x * x, '⁻¹': (x) => x === 0 ? NaN : 1 / x,
+    };
+    const OP_LABEL = { '+': ' + ', '-': ' − ', '*': ' × ', '/': ' ÷ ', '^': '^', 'mod': ' mod ', 'root': 'ˣ√' };
+
+    // ---- The expression --------------------------------------------------
+    // Tokens: num (the digits as typed, exponent included), op, fn (which
+    // opens a bracket), lp, rp, const (π, e), ans, rand (Ran#, with the value
+    // it was dealt when pressed), post (!, %, ², ³, ⁻¹).
+    const VALUE = { num: 1, const: 1, ans: 1, rand: 1 };
+    const startsOperand = (t) => !!t && (t.t in VALUE || t.t === 'lp' || t.t === 'fn');
+    const endsOperand = (t) => !!t && (t.t in VALUE || t.t === 'rp' || t.t === 'post');
+
+    // A minus that is a sign sits against its number: "5 − −2", "−3²".
+    const show = (tokens) => tokens.map((t, i) => {
+      switch (t.t) {
+        case 'num': return t.v.replace('e+', 'e').replace('e', 'ᴇ').replace(/-/g, '−');
+        case 'op': return t.v === '-' && !endsOperand(tokens[i - 1]) ? '−' : OP_LABEL[t.v];
+        case 'fn': return FN_LABEL[t.v] + '(';
+        case 'lp': return '(';
+        case 'rp': return ')';
+        case 'const': return t.v;
+        case 'ans': return 'Ans';
+        case 'rand': return 'Ran#';
+        case 'post': return t.v;
+      }
+    }).join('').replace(/\s+/g, ' ').trim();
+
+    // Recursive descent, lowest precedence first:
+    //   + −  <  × ÷ mod  <  writing two things together  <  unary −  <  ^ ˣ√ (right)  <  postfix  <  atoms
+    // so −3² is −9 and 2^3^2 is 512, as on a Casio. Brackets left open at
+    // the end are closed for free.
+    const evaluate = (tokens, deg, ans) => {
+      let i = 0;
+      const peek = () => tokens[i];
+      const isOp = (t, ...vs) => !!t && t.t === 'op' && vs.includes(t.v);
+      const expr = () => {
+        let v = term();
+        while (isOp(peek(), '+', '-')) { const o = tokens[i++].v; const r = term(); v = o === '+' ? v + r : v - r; }
+        return v;
+      };
+      const term = () => {
+        let v = juxta();
+        for (;;) {
+          const t = peek();
+          if (!isOp(t, '*', '/', 'mod')) return v;
+          i++;
+          const r = juxta();
+          if (t.v === '*') v = v * r;
+          else if (r === 0) fail("Can't divide by 0");
+          else v = t.v === '/' ? v / r : v - r * Math.floor(v / r);
+        }
+      };
+      // Writing two things together multiplies — 2π, 3(4 + 5), 2sin(30) —
+      // and binds tighter than ÷, so 1 ÷ 2π is 1 ÷ (2π), as on a Casio.
+      const juxta = () => {
+        let v = unary();
+        while (startsOperand(peek())) v = v * unary();
+        return v;
+      };
+      const unary = () => {
+        if (isOp(peek(), '-')) { i++; return -unary(); }
+        if (isOp(peek(), '+')) { i++; return unary(); }
+        return power();
+      };
+      const power = () => {
+        const v = postfix();
+        const t = peek();
+        if (isOp(t, '^', 'root')) { i++; const r = unary(); return t.v === '^' ? Math.pow(v, r) : Math.pow(r, 1 / v); }
+        return v;
+      };
+      const postfix = () => {
+        let v = atom();
+        while (peek() && peek().t === 'post') v = POST[tokens[i++].v](v);
+        return v;
+      };
+      const atom = () => {
+        const t = tokens[i++];
+        if (!t) fail(INCOMPLETE);
+        switch (t.t) {
+          case 'num': { const n = Number(t.v); if (Number.isNaN(n)) fail(INCOMPLETE); return n; }
+          case 'const': return t.v === 'π' ? Math.PI : Math.E;
+          case 'ans': return ans;
+          case 'rand': return t.v;
+          case 'lp': { const v = expr(); if (peek() && peek().t === 'rp') i++; return v; }
+          case 'fn': { const v = expr(); if (peek() && peek().t === 'rp') i++; return FN[t.v](v, deg); }
+        }
+        fail('Syntax error');
+      };
+      if (tokens.length === 0) fail(INCOMPLETE);
+      const v = expr();
+      if (i < tokens.length) fail('Syntax error');
+      if (Number.isNaN(v)) fail('Invalid input');
+      if (!Number.isFinite(v)) fail('Too large');
+      return round(v);
+    };
+
+    // ---- The state behind the keys -----------------------------------------
+    class Calc {
+      constructor(deg) {
+        this.deg = deg; this.ans = 0;
+        this.clear();
+      }
+
+      clear() { this.tokens = []; this.result = null; this.error = null; this.evaluated = false; this.recalled = false; }
+
+      get last() { return this.tokens[this.tokens.length - 1]; }
+      get expression() { return show(this.tokens) + (this.evaluated && !this.recalled ? ' =' : ''); }
+
+      // What the big line shows, and how: the answer after "=", an error,
+      // or a muted preview of where the expression has got to.
+      get display() {
+        if (this.error) return { text: this.error, kind: 'err' };
+        if (this.evaluated) return { text: fmt(this.result), kind: 'result' };
+        if (this.tokens.length === 0) return { text: '0', kind: 'result' };
+        if (this.tokens.length === 1 && this.last.t === 'num') return { text: show(this.tokens), kind: 'result' };
+        try { return { text: fmt(evaluate(this.tokens, this.deg, this.ans)), kind: 'preview' }; }
+        catch (e) { return { text: '', kind: 'preview' }; }
+      }
+
+      // Typing after "=" starts a new expression — unless it is an operator
+      // or a postfix, which carry the answer on.
+      begin(continues) {
+        this.error = null;
+        if (!this.evaluated) return;
+        const carry = this.result === this.ans ? { t: 'ans' } : { t: 'num', v: String(this.result) };
+        this.tokens = continues ? [carry] : [];
+        this.result = null; this.evaluated = false; this.recalled = false;
+      }
+
+      push(token) { this.tokens.push(token); }
+
+      digit(d) {
+        this.begin(false);
+        const l = this.last;
+        if (l && l.t === 'num') {
+          const [mant, exp] = l.v.split('e');
+          if (exp === undefined ? mant.replace(/[-.]/g, '').length >= SIG : exp.replace('-', '').length >= 3) return;
+          if (l.v === '0') l.v = '';
+          l.v += d;
+        } else this.push({ t: 'num', v: d });
+      }
+
+      point() {
+        this.begin(false);
+        const l = this.last;
+        if (l && l.t === 'num') { if (!l.v.includes('.') && !l.v.includes('e')) l.v += '.'; }
+        else this.push({ t: 'num', v: '0.' });
+      }
+
+      // ×10ˣ: the exponent is typed into the same number.
+      ee() {
+        this.begin(true);
+        const l = this.last;
+        if (l && l.t === 'num') { if (!l.v.includes('e')) l.v += 'e'; }
+        else if (endsOperand(l)) { this.push({ t: 'op', v: '*' }); this.push({ t: 'num', v: '1e' }); }
+        else this.push({ t: 'num', v: '1e' });
+      }
+
+      // ± puts a unary minus in front of the number, or takes one away, so
+      // "−3²" means −(3²) on the screen and in the answer alike. Inside an
+      // exponent it flips the exponent's sign.
+      negate() {
+        this.begin(true);
+        const l = this.last;
+        if (l && l.t === 'num' && l.v.includes('e')) {
+          const [m, e] = l.v.split('e');
+          l.v = m + 'e' + (e.startsWith('-') ? e.slice(1) : '-' + e);
+          return;
+        }
+        const n = this.tokens.length;
+        const target = endsOperand(l) ? n - 1 : n;      // before the last operand, or where the next one goes
+        const before = this.tokens[target - 1];
+        const beforeThat = this.tokens[target - 2];
+        if (before && before.t === 'op' && before.v === '-' && !endsOperand(beforeThat)) this.tokens.splice(target - 1, 1);
+        else this.tokens.splice(target, 0, { t: 'op', v: '-' });
+      }
+
+      op(v) {
+        this.begin(true);
+        const l = this.last;
+        if (l && l.t === 'op') {
+          // A second operator replaces the first — except a minus after
+          // × ÷ ^, which is a sign.
+          if (v === '-' && !['-', '+'].includes(l.v)) this.push({ t: 'op', v });
+          else l.v = v;
+          return;
+        }
+        if (!l && v !== '-') this.push({ t: 'ans' });       // "× 3" at the start means Ans × 3
+        if (l && (l.t === 'lp' || l.t === 'fn') && v !== '-') return;
+        this.push({ t: 'op', v });
+      }
+
+      fn(v) { this.begin(false); this.push({ t: 'fn', v }); }
+      constant(v) { this.begin(false); this.push({ t: 'const', v }); }
+      ansKey() { this.begin(false); this.push({ t: 'ans' }); }
+      // Ran#: 0.000 to 0.999, as on a Casio, dealt once when the key is
+      // pressed so the preview does not reroll on every keystroke.
+      random() { this.begin(false); this.push({ t: 'rand', v: Math.floor(Math.random() * 1000) / 1000 }); }
+      lparen() { this.begin(false); this.push({ t: 'lp' }); }
+
+      rparen() {
+        this.begin(true);
+        let depth = 0;
+        for (const t of this.tokens) { if (t.t === 'lp' || t.t === 'fn') depth++; else if (t.t === 'rp') depth--; }
+        if (depth > 0 && endsOperand(this.last)) this.push({ t: 'rp' });
+      }
+
+      post(v) {
+        this.begin(true);
+        if (endsOperand(this.last)) this.push({ t: 'post', v });
+      }
+
+      backspace() {
+        this.error = null;
+        if (this.evaluated) { this.clear(); return; }
+        const l = this.last;
+        if (!l) return;
+        if (l.t === 'num' && l.v.length > 1) l.v = l.v.slice(0, -1);
+        else this.tokens.pop();
+      }
+
+      // Returns the line for the tape, or null when there was nothing to do.
+      equals() {
+        this.error = null;
+        if (this.evaluated || this.tokens.length === 0) return null;
+        try {
+          this.result = evaluate(this.tokens, this.deg, this.ans);
+          // Brackets left open are closed on the screen too, so the tape reads sin(π) = 0.
+          let depth = 0;
+          for (const t of this.tokens) { if (t.t === 'lp' || t.t === 'fn') depth++; else if (t.t === 'rp') depth--; }
+          while (depth-- > 0) this.push({ t: 'rp' });
+        } catch (e) {
+          if (!(e instanceof CalcError)) throw e;
+          this.error = e.message === INCOMPLETE ? 'Syntax error' : e.message;
+          return null;
+        }
+        this.ans = this.result; this.evaluated = true;
+        return `${show(this.tokens)} = ${fmt(this.result)}`;
+      }
+
+      // The tape gives back a result to carry on from: an operator continues
+      // from it, a digit starts afresh, as after "=".
+      use(n) { this.clear(); this.tokens = [{ t: 'num', v: String(n) }]; this.result = n; this.evaluated = true; this.recalled = true; }
+    }
+
+    // ---- The component -------------------------------------------------------
+    // [label, kind, action] with an optional [label, action] for the 2nd layer.
+    const KEYS = [
+      ['2nd', 'sci', 'second'], ['DEG', 'sci', 'deg'], ['sin', 'sci', 'fn:sin', 'sin⁻¹', 'fn:asin'], ['cos', 'sci', 'fn:cos', 'cos⁻¹', 'fn:acos'], ['tan', 'sci', 'fn:tan', 'tan⁻¹', 'fn:atan'],
+      ['x²', 'sci', 'post:²', 'x³', 'post:³'], ['xʸ', 'sci', 'op:^', 'ˣ√y', 'op:root'], ['√', 'sci', 'fn:sqrt', '∛', 'fn:cbrt'], ['ln', 'sci', 'fn:ln', 'eˣ', 'fn:exp'], ['log', 'sci', 'fn:log', '10ˣ', 'fn:pow10'],
+      ['π', 'sci', 'const:π'], ['e', 'sci', 'const:e'], ['1/x', 'sci', 'post:⁻¹', '|x|', 'fn:abs'], ['x!', 'sci', 'post:!', 'mod', 'op:mod'], ['%', 'sci', 'post:%', 'Ran#', 'rand'],
+      ['AC', 'fn', 'clear'], ['(', 'fn', 'lparen'], [')', 'fn', 'rparen'], ['⌫', 'fn', 'backspace'], ['÷', 'op', 'op:/'],
+      ['7', 'num', '7'], ['8', 'num', '8'], ['9', 'num', '9'], ['±', 'fn', 'negate'], ['×', 'op', 'op:*'],
+      ['4', 'num', '4'], ['5', 'num', '5'], ['6', 'num', '6'], ['EE', 'fn', 'ee'], ['−', 'op', 'op:-'],
+      ['1', 'num', '1'], ['2', 'num', '2'], ['3', 'num', '3'], ['Ans', 'fn', 'ans'], ['+', 'op', 'op:+'],
+      ['0', 'num wide', '0'], ['.', 'num', 'point'], ['=', 'eq wide', 'equals'],
+    ];
+    const ARIA = {
+      '⌫': 'Backspace', 'AC': 'Clear', '2nd': 'Second functions', 'DEG': 'Degrees or radians', 'x²': 'Square', 'xʸ': 'Power',
+      '√': 'Square root', '1/x': 'Reciprocal', 'x!': 'Factorial', 'EE': 'Exponent', '±': 'Change sign', 'π': 'Pi', 'e': 'e',
+      'Ran#': 'Random number',
+    };
+
+    const TAPE_KEY = 'calc:tape';
+    const DEG_KEY = 'calc:deg';
+    const TAPE_MAX = 50;
+
+    // The phone's storage may be off or full; neither is a reason for the keys to stop working.
+    const stored = (key, fallback) => { try { const v = localStorage.getItem(key); return v === null ? fallback : JSON.parse(v); } catch { return fallback; } };
+    const store = (key, value) => { try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* nothing to do about it */ } };
+
+    class SlowCalc extends HTMLElement {
+      constructor() {
+        super();
+        this.calc = new Calc(stored(DEG_KEY, true) !== false);
+        this.second = false;
+        const list = stored(TAPE_KEY, []);
+        this.tape = Array.isArray(list) ? list.filter((t) => t && typeof t.line === 'string') : [];
+        const root = this.attachShadow({ mode: 'open' });
+        root.innerHTML = `
+          <style>
+            :host { display: flex; flex-direction: column; }
+            .screen {
+              flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: flex-end;
+              padding: 4px 16px 10px; text-align: right;
+            }
+            .mode { color: var(--muted); font-size: 12px; letter-spacing: .08em; min-height: 16px; }
+            .expr {
+              color: var(--ink); font-size: 26px; line-height: 1.3; min-height: 34px; max-height: 40%;
+              overflow-y: auto; overflow-wrap: anywhere; font-variant-numeric: tabular-nums;
+            }
+            .out {
+              font-size: 44px; font-weight: 300; line-height: 1.15; letter-spacing: -1px; min-height: 51px;
+              white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums;
+            }
+            .out.long { font-size: 34px; }
+            .out.longer { font-size: 27px; }
+            .out.preview { color: var(--muted); font-size: 30px; font-weight: 400; }
+            .out.preview.long { font-size: 24px; }
+            .out.preview.longer { font-size: 20px; }
+            .out.preview::before { content: '= '; }
+            .out.preview:empty::before { content: ''; }
+            .out.err { color: var(--warn); font-size: 26px; font-weight: 400; }
+            .keys {
+              flex: none; display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px;
+              padding: 6px max(10px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+            }
+            button {
+              font: inherit; font-size: 24px; border: 0; border-radius: 14px; color: var(--ink);
+              background: var(--key); height: clamp(42px, 7.6vh, 60px); cursor: pointer; padding: 0;
+              transition: transform .06s; touch-action: manipulation;
+            }
+            button:active { transform: scale(.96); }
+            button.num:active { background: var(--key-on); }
+            button.wide { grid-column: span 2; }
+            button.fn { font-size: 20px; color: #dfe8e2; }
+            button.op { background: var(--op); }
+            button.op:active { background: var(--op-on); }
+            button.eq { background: var(--eq); color: #1b2620; font-weight: 600; }
+            button.eq:active { background: var(--eq-on); }
+            button.sci { background: var(--sci); font-size: 17px; height: clamp(34px, 5.2vh, 42px); border-radius: 10px; color: #dfe8e2; }
+            button.sci:active { background: var(--key-on); }
+            button.sci.on { background: var(--op-on); color: var(--ink); }
+            :host(.second) button.sci[data-second] { color: var(--eq); }
+
+            .tape {
+              position: fixed; inset: 0; background: var(--bg); display: none;
+              flex-direction: column; padding: max(8px, env(safe-area-inset-top)) 0 env(safe-area-inset-bottom);
+            }
+            .tape.open { display: flex; }
+            .tape header { display: flex; align-items: center; justify-content: space-between; padding: 0 14px 8px 20px; }
+            .tape h2 { font-size: 16px; font-weight: 600; margin: 0; }
+            .tape header div { display: flex; gap: 8px; }
+            .tape header button { height: 36px; border-radius: 18px; font-size: 14px; padding: 0 14px; }
+            .tape header button.close { width: 36px; padding: 0; font-size: 17px; }
+            .tape ol { list-style: none; margin: 0; padding: 0 12px; overflow-y: auto; flex: 1; }
+            .tape li { margin: 0 0 6px; }
+            .tape li button {
+              width: 100%; height: auto; padding: 10px 14px; font-size: 18px; display: flex; justify-content: flex-end;
+              border-radius: 12px; background: rgba(255, 255, 255, .06); color: var(--muted);
+              font-variant-numeric: tabular-nums; white-space: nowrap;
+            }
+            /* A long sum loses its left end, never its result. */
+            .tape li button span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+            .tape li button b { flex: none; margin-left: 6px; color: var(--ink); font-weight: 500; }
+            .tape p { color: var(--muted); text-align: center; margin: 40px 20px; font-size: 14px; line-height: 1.5; }
+          </style>
+          <div class="screen" aria-live="polite">
+            <div class="mode" part="mode"></div>
+            <div class="expr" part="expression"></div>
+            <div class="out" part="display"></div>
+          </div>
+          <div class="keys"></div>
+          <div class="tape" role="dialog" aria-label="History">
+            <header>
+              <h2>History</h2>
+              <div>
+                <button class="fn wipe">Clear</button>
+                <button class="fn close" aria-label="Close history">✕</button>
+              </div>
+            </header>
+            <ol></ol>
+          </div>`;
+        this.$ = (s) => root.querySelector(s);
+        const keys = this.$('.keys');
+        for (const [label, kind, action, label2, action2] of KEYS) {
+          const b = document.createElement('button');
+          b.textContent = label; b.className = kind;
+          b.dataset.action = action; b.dataset.label = label;
+          if (label2) { b.dataset.second = action2; b.dataset.label2 = label2; }
+          b.setAttribute('aria-label', ARIA[label] || label);
+          keys.appendChild(b);
+        }
+        keys.addEventListener('click', (e) => {
+          const b = e.target.closest('button');
+          if (!b) return;
+          this.press(this.second && b.dataset.second ? b.dataset.second : b.dataset.action);
+        });
+        this.$('.close').addEventListener('click', () => this.showTape(false));
+        this.$('.wipe').addEventListener('click', () => { this.tape = []; store(TAPE_KEY, this.tape); this.renderTape(); });
+        this.$('ol').addEventListener('click', (e) => {
+          const b = e.target.closest('button');
+          if (!b) return;
+          this.calc.use(+b.dataset.value); this.showTape(false); this.render();
+        });
+        this.render();
+      }
+
+      connectedCallback() {
+        const SHORT = {
+          '.': 'point', ',': 'point', '+': 'op:+', '-': 'op:-', '*': 'op:*', 'x': 'op:*', 'X': 'op:*', '/': 'op:/', '^': 'op:^',
+          '(': 'lparen', ')': 'rparen', '%': 'post:%', '!': 'post:!', 'Enter': 'equals', '=': 'equals', 'Backspace': 'backspace',
+          's': 'fn:sin', 'c': 'fn:cos', 't': 'fn:tan', 'l': 'fn:ln', 'g': 'fn:log', 'r': 'fn:sqrt', 'q': 'post:²',
+          'p': 'const:π', 'e': 'const:e', 'E': 'ee', 'a': 'ans', '#': 'rand', 'd': 'deg', 'n': 'second', 'h': 'toggleTape', 'H': 'toggleTape',
+        };
+        this.onKey = (e) => {
+          if (e.ctrlKey || e.metaKey || e.altKey) return;
+          const k = e.key;
+          let action = null;
+          if (/^[0-9]$/.test(k)) action = k;
+          else if (k === 'Escape' || k === 'Delete') action = this.$('.tape').classList.contains('open') ? 'closeTape' : 'clear';
+          else action = SHORT[k] || null;
+          if (!action) return;
+          e.preventDefault();
+          this.press(action);
+        };
+        window.addEventListener('keydown', this.onKey);
+      }
+
+      disconnectedCallback() { window.removeEventListener('keydown', this.onKey); }
+
+      press(action) {
+        const c = this.calc;
+        if (action === 'closeTape') { this.showTape(false); return; }
+        if (action === 'toggleTape') { this.showTape(!this.$('.tape').classList.contains('open')); return; }
+        if (action === 'second') { this.second = !this.second; this.render(); return; }
+        const [kind, arg] = action.split(':');
+        if (/^[0-9]$/.test(action)) c.digit(action);
+        else if (action === 'point') c.point();
+        else if (action === 'ee') c.ee();
+        else if (action === 'backspace') c.backspace();
+        else if (action === 'clear') c.clear();
+        else if (action === 'negate') c.negate();
+        else if (action === 'lparen') c.lparen();
+        else if (action === 'rparen') c.rparen();
+        else if (action === 'ans') c.ansKey();
+        else if (action === 'rand') c.random();
+        else if (action === 'deg') { c.deg = !c.deg; store(DEG_KEY, c.deg); }
+        else if (kind === 'op') c.op(arg);
+        else if (kind === 'fn') c.fn(arg);
+        else if (kind === 'post') c.post(arg);
+        else if (kind === 'const') c.constant(arg);
+        else if (action === 'equals') {
+          const line = c.equals();
+          if (line) this.record(line, c.result);
+        }
+        this.second = false;   // 2nd is for one key, like SHIFT on a Casio
+        if (navigator.vibrate) navigator.vibrate(8);
+        this.render();
+      }
+
+      render() {
+        const c = this.calc;
+        const { text, kind } = c.display;
+        const out = this.$('.out');
+        out.textContent = text;
+        out.className = 'out ' + kind + (text.length > 15 ? ' longer' : text.length > 11 ? ' long' : '');
+        const expr = this.$('.expr');
+        expr.textContent = c.expression;
+        expr.scrollTop = expr.scrollHeight;
+        this.$('.mode').textContent = c.deg ? 'DEG' : 'RAD';
+        this.classList.toggle('second', this.second);
+        for (const b of this.$('.keys').querySelectorAll('button[data-second]')) {
+          b.textContent = this.second ? b.dataset.label2 : b.dataset.label;
+        }
+        this.$('[data-action="second"]').classList.toggle('on', this.second);
+        const degBtn = this.$('[data-action="deg"]');
+        degBtn.textContent = c.deg ? 'DEG' : 'RAD';
+        this.$('[data-action="clear"]').textContent = (c.tokens.length || c.error) ? 'C' : 'AC';
+      }
+
+      record(line, value) {
+        this.tape.unshift({ line, value });
+        if (this.tape.length > TAPE_MAX) this.tape.length = TAPE_MAX;
+        store(TAPE_KEY, this.tape);
+        this.renderTape();
+      }
+
+      renderTape() {
+        const ol = this.$('ol');
+        ol.innerHTML = '';
+        if (this.tape.length === 0) {
+          const p = document.createElement('p');
+          p.textContent = 'Nothing yet. Each = you press is kept here, and tapping a line carries its result on.';
+          ol.appendChild(p);
+          return;
+        }
+        for (const { line, value } of this.tape) {
+          const li = document.createElement('li');
+          const b = document.createElement('button');
+          const i = line.lastIndexOf(' = ');
+          const span = document.createElement('span');
+          span.textContent = line.slice(0, i + 3);
+          b.appendChild(span);
+          const strong = document.createElement('b');
+          strong.textContent = line.slice(i + 3);
+          b.appendChild(strong);
+          b.dataset.value = String(value);
+          if (!Number.isFinite(value)) b.disabled = true;
+          li.appendChild(b);
+          ol.appendChild(li);
+        }
+      }
+
+      showTape(open) {
+        if (open) { this.renderTape(); document.querySelector('dash-widget')?.pause(); }
+        this.$('.tape').classList.toggle('open', open);
+      }
+    }
+
+    customElements.define('slow-calc', SlowCalc);
+
+    // ---- The runner in the corner ----------------------------------------
+    // A cube that runs and jumps, Geometry-Dash fashion, over terrain made
+    // up as it goes: ground that steps up and down, pits, spikes on whatever
+    // level is there, and a skyline behind it — all from one seed per
+    // attempt, so a run is random but a frame is never. One tap to start,
+    // tap to jump, tap to try again. It only draws while a run is on.
+    const DASH_KEY = 'calc:dash';
+    const CELL = 10, LEVEL = 10, SPIKE_H = 12, CUBE = 14, PX = 22;
+
+    // mulberry32: a seeded generator, so the terrain is reproducible from its seed.
+    const seeded = (seed) => () => {
+      seed = (seed + 0x6D2B79F5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+
+    class DashWidget extends HTMLElement {
+      constructor() {
+        super();
+        const root = this.attachShadow({ mode: 'open' });
+        root.innerHTML = `
+          <style>
+            :host { display: block; border-radius: 10px; overflow: hidden; background: #101a15; cursor: pointer;
+              -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+            canvas { display: block; width: 100%; height: 100%; }
+          </style>
+          <canvas role="button" aria-label="Tap to jump" tabindex="0"></canvas>`;
+        this.canvas = root.querySelector('canvas');
+        this.ctx = this.canvas.getContext('2d');
+        this.best = +stored(DASH_KEY, 0) || 0;
+        this.attempt = 0;
+        this.state = 'idle';
+        this.reset(1);
+        this.held = false; this.buffer = -Infinity; this.particles = [];
+        this.canvas.addEventListener('pointerdown', (e) => { e.preventDefault(); this.press(); });
+        this.onKey = (e) => {
+          if (e.key !== ' ' || e.ctrlKey || e.metaKey || e.altKey) return;
+          e.preventDefault();
+          if (!e.repeat) this.press();
+        };
+        this.onKeyUp = (e) => { if (e.key === ' ') this.release(); };
+        this.onRelease = () => this.release();
+        this.onHide = () => { if (document.hidden) this.pause(); };
+        this.loop = this.loop.bind(this);
+        this.burst = this.burst.bind(this);
+      }
+
+      connectedCallback() {
+        window.addEventListener('keydown', this.onKey);
+        window.addEventListener('keyup', this.onKeyUp);
+        window.addEventListener('pointerup', this.onRelease);
+        window.addEventListener('pointercancel', this.onRelease);
+        document.addEventListener('visibilitychange', this.onHide);
+        this.ro = new ResizeObserver(() => this.fit());
+        this.ro.observe(this);
+        this.fit();
+      }
+      disconnectedCallback() {
+        window.removeEventListener('keydown', this.onKey);
+        window.removeEventListener('keyup', this.onKeyUp);
+        window.removeEventListener('pointerup', this.onRelease);
+        window.removeEventListener('pointercancel', this.onRelease);
+        document.removeEventListener('visibilitychange', this.onHide);
+        this.ro.disconnect();
+      }
+
+      // Holding the button or the bar keeps the cube jumping as it lands,
+      // and a press a moment before landing still counts — both as in the
+      // real thing, and both what make a run feel fair at speed.
+      press() { this.held = true; this.tap(); }
+      release() { this.held = false; }
+      pause() { if (this.state === 'running') { this.state = 'paused'; this.draw(); } }
+
+      // The world is always 52 units tall, whatever size the widget is
+      // drawn at, so a bigger widget shows a bigger cube, not more ground.
+      fit() {
+        const dpr = window.devicePixelRatio || 1;
+        const r = this.getBoundingClientRect();
+        const zoom = Math.max(r.height, 1) / 52;
+        this.h = 52; this.w = Math.max(1, r.width / zoom);
+        this.canvas.width = Math.round(r.width * dpr); this.canvas.height = Math.round(r.height * dpr);
+        this.ctx.setTransform(dpr * zoom, 0, 0, dpr * zoom, 0, 0);
+        this.draw();
+      }
+
+      // ---- Terrain -------------------------------------------------------
+      // A column per CELL of world: its level (null is a pit), whether a spike
+      // stands on it, and whether passing it scores. Columns are made ahead
+      // of the screen and dropped once behind it.
+      reset(seed) {
+        this.seed = seed; this.rng = seeded(seed);
+        this.y = 0; this.vy = 0; this.rot = 0; this.score = 0; this.speed = 100; this.dist = 0;
+        this.cols = []; this.col0 = 0; this.level = 0; this.cam = 0;
+        this.particles = []; this.newBest = false; this.buffer = -Infinity;
+        for (let i = 0; i < 16; i++) this.cols.push({ h: 0, spike: false, feat: false, passed: false });
+        // The skyline: two layers of hills, each a sum of three seeded waves.
+        this.hills = [0, 1].map(() => [0, 1, 2].map((k) => ({
+          a: (3 + this.rng() * 5) / (k + 1), f: (0.012 + this.rng() * 0.02) * (k + 1), p: this.rng() * Math.PI * 2,
+        })));
+      }
+
+      col(i) { const c = this.cols[i - this.col0]; return c === undefined ? null : c; }
+
+      // The grammar: a piece at a time, flats between features, with the
+      // features getting denser as the run goes on. Every piece is fair: a
+      // pit is at most three cells, a step is one level, and after any
+      // feature — a drop off a ledge included, since a falling cube cannot
+      // jump — there is at least a whole jump's worth of flat, measured at
+      // the current speed, so a late landing still has room before the
+      // next thing. Difficulty is taken out of the spare flats, never that.
+      extend() {
+        const r = this.rng, d = Math.min(1, this.dist / 2500);
+        const F = Math.ceil((this.speed * 0.46 + 8) / CELL);   // cells a jump covers, with a little spare
+        const spare = () => Math.floor(r() * (1 + 4 * (1 - d)));
+        const flat = (n, h = this.level) => { for (let i = 0; i < n; i++) this.cols.push({ h, spike: false, feat: false, passed: false }); };
+        const roll = r();
+        if (roll < 0.22 - d * 0.1) { flat(2 + spare()); return; }
+        if (roll < 0.50) {
+          const n = (this.score >= 3 && r() < 0.3 + d * 0.3) ? 2 : 1;
+          for (let i = 0; i < n; i++) this.cols.push({ h: this.level, spike: true, feat: i === 0, passed: false });
+          flat(F + spare()); return;
+        }
+        if (roll < 0.68) {
+          const n = 2 + (r() < d ? 1 : 0);
+          for (let i = 0; i < n; i++) this.cols.push({ h: null, spike: false, feat: i === 0, passed: false });
+          flat(F + spare()); return;
+        }
+        if (roll < 0.85 && this.level < 2) {
+          this.level++;
+          this.cols.push({ h: this.level, spike: false, feat: true, passed: false });
+          flat(F + spare()); return;
+        }
+        if (this.level > 0) { this.level = r() < 0.5 ? 0 : this.level - 1; flat(F + spare()); return; }
+        flat(3 + spare());
+      }
+
+      // ---- The run ---------------------------------------------------------
+      jump() { this.vy = 230; this.rot = 0; this.onGround = false; this.buffer = -Infinity; }
+
+      tap() {
+        if (this.state === 'running') {
+          if (this.onGround) this.jump(); else this.buffer = performance.now();
+          return;
+        }
+        if (this.state === 'paused') { this.state = 'running'; this.last = performance.now(); requestAnimationFrame(this.loop); return; }
+        this.reset((Math.random() * 0x7fffffff) | 0);
+        this.attempt++;
+        this.onGround = true;
+        this.state = 'running';
+        this.last = performance.now();
+        requestAnimationFrame(this.loop);
+      }
+
+      loop(now) {
+        if (this.state !== 'running') return;
+        const dt = Math.min(0.05, (now - this.last) / 1000);
+        this.last = now;
+        this.step(dt);
+        this.draw();
+        if (this.state === 'running') requestAnimationFrame(this.loop);
+      }
+
+      step(dt) {
+        const G = 1000;   // with a 230 px/s jump: 0.46 s in the air, 26 px high, 40 px of ground
+        this.dist += this.speed * dt;
+        while ((this.col0 + this.cols.length) * CELL < this.dist + this.w + CELL * 4) this.extend();
+        while (this.cols.length && (this.col0 + 1) * CELL < this.dist - 40) { this.cols.shift(); this.col0++; }
+
+        // The ground under the cube is the highest column it stands over.
+        const left = this.dist + PX + 2, right = this.dist + PX + CUBE - 2;
+        const i0 = Math.floor(left / CELL), i1 = Math.floor((right - 0.01) / CELL);
+        let gh = -Infinity;
+        for (let i = i0; i <= i1; i++) { const c = this.col(i); if (c && c.h !== null) gh = Math.max(gh, c.h * LEVEL); }
+
+        // The camera follows the ground the cube stands on, so a jump from
+        // the top level stays in frame; it glides rather than snaps.
+        const standing = gh === -Infinity ? this.cam : Math.min(gh, 2 * LEVEL);
+        this.cam += (standing - this.cam) * Math.min(1, dt * 6);
+
+        if (!this.onGround || this.y > gh) {
+          this.onGround = false;
+          this.y += this.vy * dt; this.vy -= G * dt;
+          this.rot += (Math.PI / 2) * dt / 0.46;
+        }
+        if (this.y <= gh) {
+          if (this.y < gh - 4) { this.die(); return; }     // ran into the side of a step
+          this.y = gh; this.vy = 0; this.rot = 0; this.onGround = true;
+          if (this.held || performance.now() - this.buffer < 120) this.jump();   // held, or pressed just before landing
+        } else if (this.y === gh) {
+          this.onGround = true;
+        } else if (gh === -Infinity && this.y < -CUBE * 1.5) { this.die(); return; }   // down a pit
+
+        // Spikes: the hit box is the upper two thirds, so a close shave is a shave.
+        for (let i = i0; i <= i1; i++) {
+          const c = this.col(i);
+          if (!c || !c.spike) continue;
+          const sx = i * CELL;
+          if (left < sx + CELL - 3 && right > sx + 3 && this.y < c.h * LEVEL + SPIKE_H - 5) { this.die(); return; }
+        }
+        // Scoring: each feature once, when the cube is past it.
+        for (let i = this.col0; i < i0; i++) {
+          const c = this.col(i);
+          if (c && c.feat && !c.passed) { c.passed = true; this.score++; this.speed = Math.min(135, this.speed + 1); }
+        }
+      }
+
+      die() {
+        this.state = 'dead';
+        this.newBest = this.score > this.best && this.score > 0;
+        if (this.newBest) { this.best = this.score; store(DASH_KEY, this.best); }
+        if (navigator.vibrate) navigator.vibrate(20);
+        // The cube goes to pieces: a dozen bits of it, flying, for half a second.
+        const cx = PX + CUBE / 2, cy = this.y + CUBE / 2;
+        this.particles = Array.from({ length: 12 }, (_, k) => {
+          const a = (k / 12) * Math.PI * 2 + Math.random() * 0.5, sp = 60 + Math.random() * 90;
+          return { x: cx, y: cy, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp + 60, life: 0.5 };
+        });
+        this.lastBurst = performance.now();
+        requestAnimationFrame(this.burst);
+      }
+
+      burst(now) {
+        if (this.state !== 'dead' || this.particles.length === 0) return;
+        const dt = Math.min(0.05, (now - this.lastBurst) / 1000);
+        this.lastBurst = now;
+        for (const p of this.particles) { p.x += p.vx * dt; p.y += p.vy * dt; p.vy -= 400 * dt; p.life -= dt; }
+        this.particles = this.particles.filter((p) => p.life > 0);
+        this.draw();
+        if (this.particles.length) requestAnimationFrame(this.burst);
+      }
+
+      // ---- Drawing -----------------------------------------------------------
+      skyline(layer, parallax, base) {
+        const c = this.ctx, w = this.w;
+        c.beginPath(); c.moveTo(0, this.h);
+        for (let x = 0; x <= w; x += 4) {
+          const wx = x + this.dist * parallax;
+          let y = 0;
+          for (const { a, f, p } of this.hills[layer]) y += a * Math.sin(wx * f + p);
+          c.lineTo(x, base - y);
+        }
+        c.lineTo(w, this.h); c.closePath(); c.fill();
+      }
+
+      draw() {
+        const c = this.ctx, w = this.w, h = this.h, base = h - 6 + this.cam;
+        c.clearRect(0, 0, w, h);
+        const bg = c.createLinearGradient(0, 0, 0, h);
+        bg.addColorStop(0, '#182a34'); bg.addColorStop(1, '#0e1a20');
+        c.fillStyle = bg; c.fillRect(0, 0, w, h);
+        c.fillStyle = '#17323a'; this.skyline(0, 0.25, h - 20 + this.cam * 0.3);
+        c.fillStyle = '#1a3d3a'; this.skyline(1, 0.5, h - 12 + this.cam * 0.5);
+
+        // Terrain: a column per cell, shaded by level, with a bright top edge.
+        const shades = ['#1c3a30', '#245040', '#2d6650'];
+        for (let i = this.col0; i < this.col0 + this.cols.length; i++) {
+          const col = this.col(i);
+          const sx = i * CELL - this.dist;
+          if (sx > w || sx + CELL < 0) continue;
+          if (col.h === null) continue;
+          const top = base - col.h * LEVEL;
+          c.fillStyle = shades[col.h]; c.fillRect(sx, top, CELL + 0.5, h - top);
+          c.fillStyle = '#9fd9c4'; c.fillRect(sx, top, CELL + 0.5, 1);
+          const prev = this.col(i - 1);
+          if (prev && prev.h !== null && prev.h < col.h) { c.fillRect(sx, top, 1, (col.h - prev.h) * LEVEL); }
+          if (col.spike) {
+            c.beginPath(); c.moveTo(sx, top); c.lineTo(sx + CELL / 2, top - SPIKE_H); c.lineTo(sx + CELL, top); c.closePath();
+            c.fillStyle = '#dfe8e2'; c.fill(); c.strokeStyle = '#1b2620'; c.lineWidth = 1; c.stroke();
+          }
+        }
+
+        // The cube — or, just after a crash, its pieces.
+        if (this.particles.length) {
+          for (const p of this.particles) {
+            c.globalAlpha = Math.max(0, p.life / 0.5);
+            c.fillStyle = '#e8a33a'; c.fillRect(p.x - 2, base - p.y - 2, 4, 4);
+          }
+          c.globalAlpha = 1;
+        } else {
+          c.save();
+          c.translate(PX + CUBE / 2, base - CUBE / 2 - this.y);
+          c.rotate(this.rot);
+          c.fillStyle = this.state === 'dead' ? '#e2533b' : '#e8a33a';
+          c.fillRect(-CUBE / 2, -CUBE / 2, CUBE, CUBE);
+          c.fillStyle = '#1b2620'; c.fillRect(-CUBE / 2 + 3, -CUBE / 2 + 3, 4, 4); c.fillRect(1, -CUBE / 2 + 3, 4, 4);
+          c.fillRect(-CUBE / 2 + 3, 2, CUBE - 6, 3);
+          c.strokeStyle = '#1b2620'; c.lineWidth = 1.5; c.strokeRect(-CUBE / 2, -CUBE / 2, CUBE, CUBE);
+          c.restore();
+        }
+
+        // Words
+        c.font = '600 10px -apple-system, Segoe UI, Roboto, sans-serif';
+        c.textBaseline = 'top'; c.textAlign = 'right';
+        c.fillStyle = '#9fb0a6';
+        if (this.state === 'idle') { c.fillText(this.best ? `best ${this.best} · tap ▶` : 'tap ▶', w - 5, 5); }
+        else if (this.state === 'dead') {
+          c.fillStyle = this.newBest ? '#e8a33a' : '#e2533b';
+          c.fillText(this.newBest ? `★ new best ${this.score}` : `✕ ${this.score} · best ${this.best}`, w - 5, 5);
+        }
+        else if (this.state === 'paused') { c.fillText(`paused · ${this.score}`, w - 5, 5); }
+        else { c.fillStyle = '#f3f7f4'; c.fillText(String(this.score), w - 5, 5); c.textAlign = 'left'; c.fillStyle = '#9fb0a6'; c.fillText(`#${this.attempt}`, 5, 5); }
+      }
+    }
+    customElements.define('dash-widget', DashWidget);
+    // pointerdown, not click: a jump has to happen on the press, not the release.
+    document.getElementById('jumpBtn').addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      document.querySelector('dash-widget').press();
+    });
+    document.getElementById('tapeBtn').addEventListener('click', () => {
+      document.querySelector('slow-calc').press('toggleTape');
+    });
+  </script>
+</body>
+
+</html>
