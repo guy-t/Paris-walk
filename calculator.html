@@ -10,7 +10,8 @@
     :root {
       --bg: #1b2620; --ink: #f3f7f4; --muted: #9fb0a6;
       --key: rgba(255, 255, 255, .10); --key-on: rgba(255, 255, 255, .28);
-      --op: #2f4f3e; --op-on: #3f6a54; --eq: #e8a33a; --eq-on: #f2b858; --warn: #e2533b;
+      --op: #2f4f3e; --op-on: #3f6a54; --sci: rgba(255, 255, 255, .05);
+      --eq: #e8a33a; --eq-on: #f2b858; --warn: #e2533b;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     }
     * { box-sizing: border-box; }
@@ -45,249 +46,378 @@
   <script>
     'use strict';
 
-    // ---- The arithmetic ------------------------------------------------
-    // A pocket calculator: immediate execution, left to right, no precedence.
-    // 2 + 3 × 4 = 20 here, as on the one in a kitchen drawer. Every number is
-    // rounded to 12 significant digits before it is shown or chained, so
-    // 0.1 + 0.2 reads 0.3 and a long chain does not drift into 2.9999999.
-    const SIG = 12;
+    // ---- Numbers ---------------------------------------------------------
+    // Every result is rounded to 15 significant digits before it is shown or
+    // reused — as many as a double can honestly carry — so 0.1 + 0.2 reads
+    // 0.3 and sin(30°) reads 0.5 rather than 0.49999999999999994.
+    const SIG = 15;
+    const PLAIN_MAX = 1e15;   // written out in full below this, as a power of ten above
     const round = (n) => (Number.isFinite(n) && n !== 0) ? +n.toPrecision(SIG) : n;
 
-    const apply = (a, op, b) => {
-      switch (op) {
-        case '+': return round(a + b);
-        case '-': return round(a - b);
-        case '*': return round(a * b);
-        case '/': return b === 0 ? NaN : round(a / b);
-        case '^': return round(Math.pow(a, b));
-      }
-      return b;
-    };
-
-    // The one-number functions. √ of a negative and 0^-1 come out NaN,
-    // e^1000 comes out Infinity; `reason` turns either into words.
-    const UNARY = {
-      sqrt: { f: Math.sqrt, show: (x) => `√(${x})` },
-      square: { f: (x) => x * x, show: (x) => `(${x})²` },
-      exp: { f: Math.exp, show: (x) => `e^(${x})` },
-      pow10: { f: (x) => Math.pow(10, x), show: (x) => `10^(${x})` },
-    };
-    const reason = (n, op, b) => {
-      if (op === '/' && b === 0) return "Can't divide by 0";
-      return Number.isNaN(n) ? 'Invalid input' : 'Too large';
-    };
-
-    const SYMBOL = { '+': '+', '-': '−', '*': '×', '/': '÷', '^': '^' };
-    const BINARY = '+-*/^';
-
-    // Format for display: plain up to 12 digits, exponent beyond, no trailing
-    // zeros after the point, and "−" rather than a hyphen.
+    // Plain up to 15 digits, exponent beyond, no trailing zeros, "−" not "-".
     const fmt = (n) => {
       if (!Number.isFinite(n)) return 'Error';
       const abs = Math.abs(n);
-      let s = (abs !== 0 && (abs >= 1e12 || abs < 1e-9)) ? n.toExponential(6) : String(n);
-      if (s.includes('e')) {
-        s = s.replace(/\.?0+e/, 'e').replace('e+', 'e');
-      }
-      return s.replace('-', '−');
+      let s = (abs !== 0 && (abs >= PLAIN_MAX || abs < 1e-9)) ? n.toExponential(SIG - 1) : n.toPrecision(SIG);
+      if (!s.includes('e') && s.includes('.')) s = s.replace(/\.?0+$/, '');
+      if (s.includes('e')) s = s.replace(/\.?0+e/, 'e').replace('e+', 'e').replace('e', 'ᴇ');
+      return s.replace(/-/g, '−');
     };
 
-    // The state machine behind the keys. `entry` is the text being typed
-    // (null while the display shows a produced number); `acc` and `op` the
-    // pending operation; `hasOperand` says whether a number has been given
-    // since the operator was pressed; `last` is the operand of the previous
-    // "=", so "=" again repeats it.
+    class CalcError extends Error { }
+    const fail = (msg) => { throw new CalcError(msg); };
+    const INCOMPLETE = 'incomplete';   // a trailing operator: nothing to show yet, not a fault
+
+    // ---- Functions -------------------------------------------------------
+    // Trig in degrees handles the exact points itself: sin 180° is 0, not
+    // 1.2e-16, and tan 90° is undefined rather than 1.6e16.
+    const snap = (x) => Math.abs(x) < 1e-15 ? 0 : x;
+    const sinD = (d) => {
+      const r = ((d % 360) + 360) % 360;
+      if (r % 180 === 0) return 0;
+      if (r === 90) return 1;
+      if (r === 270) return -1;
+      return Math.sin(d * Math.PI / 180);
+    };
+    const tanD = (d) => {
+      const r = ((d % 360) + 360) % 360;
+      if (r % 180 === 0) return 0;
+      if (r === 90 || r === 270) return NaN;
+      return sinD(d) / sinD(d + 90);
+    };
+    const factorial = (n) => {
+      if (n < 0 || n !== Math.floor(n)) return NaN;
+      if (n > 170) return Infinity;
+      let f = 1;
+      for (let i = 2; i <= n; i++) f *= i;
+      return f;
+    };
+    const FN = {
+      sin: (x, deg) => deg ? sinD(x) : snap(Math.sin(x)),
+      cos: (x, deg) => deg ? sinD(x + 90) : snap(Math.cos(x)),
+      tan: (x, deg) => deg ? tanD(x) : snap(Math.tan(x)),
+      asin: (x, deg) => Math.asin(x) * (deg ? 180 / Math.PI : 1),
+      acos: (x, deg) => Math.acos(x) * (deg ? 180 / Math.PI : 1),
+      atan: (x, deg) => Math.atan(x) * (deg ? 180 / Math.PI : 1),
+      ln: (x) => x <= 0 ? NaN : Math.log(x), log: (x) => x <= 0 ? NaN : Math.log10(x),
+      sqrt: (x) => Math.sqrt(x), cbrt: (x) => Math.cbrt(x),
+      exp: (x) => Math.exp(x), pow10: (x) => Math.pow(10, x), abs: (x) => Math.abs(x),
+    };
+    const FN_LABEL = {
+      sin: 'sin', cos: 'cos', tan: 'tan', asin: 'sin⁻¹', acos: 'cos⁻¹', atan: 'tan⁻¹',
+      ln: 'ln', log: 'log', sqrt: '√', cbrt: '∛', exp: 'e^', pow10: '10^', abs: 'abs',
+    };
+    const POST = {
+      '!': factorial, '%': (x) => x / 100, '²': (x) => x * x, '³': (x) => x * x * x, '⁻¹': (x) => x === 0 ? NaN : 1 / x,
+    };
+    const OP_LABEL = { '+': ' + ', '-': ' − ', '*': ' × ', '/': ' ÷ ', '^': '^', 'mod': ' mod ', 'root': 'ˣ√' };
+
+    // ---- The expression --------------------------------------------------
+    // Tokens: num (the digits as typed, exponent included), op, fn (which
+    // opens a bracket), lp, rp, const (π, e), ans, post (!, %, ², ³, ⁻¹).
+    const startsOperand = (t) => !!t && (t.t === 'num' || t.t === 'const' || t.t === 'ans' || t.t === 'lp' || t.t === 'fn');
+    const endsOperand = (t) => !!t && (t.t === 'num' || t.t === 'const' || t.t === 'ans' || t.t === 'rp' || t.t === 'post');
+
+    // A minus that is a sign sits against its number: "5 − −2", "−3²".
+    const show = (tokens) => tokens.map((t, i) => {
+      switch (t.t) {
+        case 'num': return t.v.replace('e', 'ᴇ').replace(/-/g, '−');
+        case 'op': return t.v === '-' && !endsOperand(tokens[i - 1]) ? '−' : OP_LABEL[t.v];
+        case 'fn': return FN_LABEL[t.v] + '(';
+        case 'lp': return '(';
+        case 'rp': return ')';
+        case 'const': return t.v;
+        case 'ans': return 'Ans';
+        case 'post': return t.v;
+      }
+    }).join('').replace(/\s+/g, ' ').trim();
+
+    // Recursive descent, lowest precedence first:
+    //   + −  <  × ÷ mod and writing two things together  <  unary −  <  ^ ˣ√ (right)  <  postfix  <  atoms
+    // so −3² is −9 and 2^3^2 is 512, as on a Casio. Brackets left open at
+    // the end are closed for free.
+    const evaluate = (tokens, deg, ans) => {
+      let i = 0;
+      const peek = () => tokens[i];
+      const isOp = (t, ...vs) => !!t && t.t === 'op' && vs.includes(t.v);
+      const expr = () => {
+        let v = term();
+        while (isOp(peek(), '+', '-')) { const o = tokens[i++].v; const r = term(); v = o === '+' ? v + r : v - r; }
+        return v;
+      };
+      const term = () => {
+        let v = unary();
+        for (;;) {
+          const t = peek();
+          if (isOp(t, '*', '/', 'mod')) {
+            i++;
+            const r = unary();
+            if (t.v === '*') v = v * r;
+            else if (r === 0) fail("Can't divide by 0");
+            else v = t.v === '/' ? v / r : v - r * Math.floor(v / r);
+          } else if (startsOperand(t)) {
+            v = v * unary();   // 2π, 3(4 + 5), 2sin(30)
+          } else return v;
+        }
+      };
+      const unary = () => {
+        if (isOp(peek(), '-')) { i++; return -unary(); }
+        if (isOp(peek(), '+')) { i++; return unary(); }
+        return power();
+      };
+      const power = () => {
+        const v = postfix();
+        const t = peek();
+        if (isOp(t, '^', 'root')) { i++; const r = unary(); return t.v === '^' ? Math.pow(v, r) : Math.pow(r, 1 / v); }
+        return v;
+      };
+      const postfix = () => {
+        let v = atom();
+        while (peek() && peek().t === 'post') v = POST[tokens[i++].v](v);
+        return v;
+      };
+      const atom = () => {
+        const t = tokens[i++];
+        if (!t) fail(INCOMPLETE);
+        switch (t.t) {
+          case 'num': { const n = Number(t.v); if (Number.isNaN(n)) fail(INCOMPLETE); return n; }
+          case 'const': return t.v === 'π' ? Math.PI : Math.E;
+          case 'ans': return ans;
+          case 'lp': { const v = expr(); if (peek() && peek().t === 'rp') i++; return v; }
+          case 'fn': { const v = expr(); if (peek() && peek().t === 'rp') i++; return FN[t.v](v, deg); }
+        }
+        fail('Syntax error');
+      };
+      if (tokens.length === 0) fail(INCOMPLETE);
+      const v = expr();
+      if (i < tokens.length) fail('Syntax error');
+      if (Number.isNaN(v)) fail('Invalid input');
+      if (!Number.isFinite(v)) fail('Too large');
+      return round(v);
+    };
+
+    // ---- The state behind the keys -----------------------------------------
     class Calc {
-      constructor() { this.clear(); }
-
-      clear() {
-        this.entry = null; this.value = 0; this.hasOperand = false; this.error = null; this.note = '';
-        this.fresh();
+      constructor(deg) {
+        this.deg = deg; this.ans = 0;
+        this.clear();
       }
 
-      // Forget the finished sum: the next number starts a new one.
-      fresh() {
-        this.acc = null; this.op = null; this.last = null; this.justEvaluated = false; this.lastExpr = '';
-      }
+      clear() { this.tokens = []; this.result = null; this.error = null; this.evaluated = false; }
 
+      get last() { return this.tokens[this.tokens.length - 1]; }
+      get expression() { return show(this.tokens, this.deg) + (this.evaluated ? ' =' : ''); }
+
+      // What the big line shows, and how: the answer after "=", an error,
+      // or a muted preview of where the expression has got to.
       get display() {
-        if (this.error) return this.error;
-        return this.entry !== null ? this.entry.replace('-', '−') : fmt(this.value);
+        if (this.error) return { text: this.error, kind: 'err' };
+        if (this.evaluated) return { text: fmt(this.result), kind: 'result' };
+        if (this.tokens.length === 0) return { text: '0', kind: 'result' };
+        if (this.tokens.length === 1 && this.last.t === 'num') return { text: show(this.tokens), kind: 'result' };
+        try { return { text: fmt(evaluate(this.tokens, this.deg, this.ans)), kind: 'preview' }; }
+        catch (e) { return { text: '', kind: 'preview' }; }
       }
 
-      get expression() {
-        if (this.justEvaluated) return this.lastExpr;
-        const pending = (this.acc === null || this.op === null) ? '' : `${fmt(this.acc)} ${SYMBOL[this.op]}`;
-        return [pending, this.note].filter(Boolean).join(' ');
+      // Typing after "=" starts a new expression — unless it is an operator
+      // or a postfix, which carry the answer on.
+      begin(continues) {
+        this.error = null;
+        if (!this.evaluated) return;
+        this.tokens = continues ? [{ t: 'ans' }] : [];
+        this.result = null; this.evaluated = false;
       }
 
-      // The number currently being read, whether typed or produced.
-      get current() { return this.entry !== null ? +this.entry : this.value; }
-
-      begin() {
-        if (this.error) this.clear();
-        if (this.justEvaluated) { this.fresh(); this.entry = null; }
-      }
+      push(token) { this.tokens.push(token); }
 
       digit(d) {
-        this.begin();
-        if (this.entry === null) { this.entry = ''; this.note = ''; }
-        // Twelve digits is what the display can show without an exponent.
-        if (this.entry.replace(/[-.]/g, '').length >= SIG) return;
-        if (this.entry === '0') this.entry = '';
-        if (this.entry === '-0') this.entry = '-';
-        this.entry += d;
-        this.hasOperand = true;
+        this.begin(false);
+        const l = this.last;
+        if (l && l.t === 'num') {
+          const [mant, exp] = l.v.split('e');
+          if (exp === undefined ? mant.replace(/[-.]/g, '').length >= SIG : exp.replace('-', '').length >= 3) return;
+          if (l.v === '0') l.v = '';
+          l.v += d;
+        } else this.push({ t: 'num', v: d });
       }
 
       point() {
-        this.begin();
-        if (this.entry === null) { this.entry = ''; this.note = ''; }
-        if (!this.entry.includes('.')) this.entry += (this.entry === '' || this.entry === '-') ? '0.' : '.';
-        this.hasOperand = true;
+        this.begin(false);
+        const l = this.last;
+        if (l && l.t === 'num') { if (!l.v.includes('.') && !l.v.includes('e')) l.v += '.'; }
+        else this.push({ t: 'num', v: '0.' });
+      }
+
+      // ×10ˣ: the exponent is typed into the same number.
+      ee() {
+        this.begin(true);
+        const l = this.last;
+        if (l && l.t === 'num') { if (!l.v.includes('e')) l.v += 'e'; }
+        else if (endsOperand(l)) { this.push({ t: 'op', v: '*' }); this.push({ t: 'num', v: '1e' }); }
+        else this.push({ t: 'num', v: '1e' });
+      }
+
+      // ± puts a unary minus in front of the number, or takes one away, so
+      // "−3²" means −(3²) on the screen and in the answer alike. Inside an
+      // exponent it flips the exponent's sign.
+      negate() {
+        this.begin(true);
+        const l = this.last;
+        if (l && l.t === 'num' && l.v.includes('e')) {
+          const [m, e] = l.v.split('e');
+          l.v = m + 'e' + (e.startsWith('-') ? e.slice(1) : '-' + e);
+          return;
+        }
+        const n = this.tokens.length;
+        const target = endsOperand(l) ? n - 1 : n;      // before the last operand, or where the next one goes
+        const before = this.tokens[target - 1];
+        const beforeThat = this.tokens[target - 2];
+        if (before && before.t === 'op' && before.v === '-' && !endsOperand(beforeThat)) this.tokens.splice(target - 1, 1);
+        else this.tokens.splice(target, 0, { t: 'op', v: '-' });
+      }
+
+      op(v) {
+        this.begin(true);
+        const l = this.last;
+        if (l && l.t === 'op') {
+          // A second operator replaces the first — except a minus after
+          // × ÷ ^, which is a sign.
+          if (v === '-' && !['-', '+'].includes(l.v)) this.push({ t: 'op', v });
+          else l.v = v;
+          return;
+        }
+        if (!l && v !== '-') this.push({ t: 'ans' });       // "× 3" at the start means Ans × 3
+        if (l && (l.t === 'lp' || l.t === 'fn') && v !== '-') return;
+        this.push({ t: 'op', v });
+      }
+
+      fn(v) { this.begin(false); this.push({ t: 'fn', v }); }
+      constant(v) { this.begin(false); this.push({ t: 'const', v }); }
+      ansKey() { this.begin(false); this.push({ t: 'ans' }); }
+      lparen() { this.begin(false); this.push({ t: 'lp' }); }
+
+      rparen() {
+        this.begin(true);
+        let depth = 0;
+        for (const t of this.tokens) { if (t.t === 'lp' || t.t === 'fn') depth++; else if (t.t === 'rp') depth--; }
+        if (depth > 0 && endsOperand(this.last)) this.push({ t: 'rp' });
+      }
+
+      post(v) {
+        this.begin(true);
+        if (endsOperand(this.last)) this.push({ t: 'post', v });
       }
 
       backspace() {
-        if (this.error) { this.clear(); return; }
-        if (this.entry === null) return;
-        this.entry = this.entry.slice(0, -1);
-        if (this.entry === '' || this.entry === '-') { this.entry = null; this.value = 0; }
-      }
-
-      negate() {
-        if (this.error) return;
-        if (this.justEvaluated) this.begin();
-        if (this.entry === null && this.value === 0) this.entry = '0';  // ± before a number starts a negative one
-        if (this.entry !== null) {
-          this.entry = this.entry.startsWith('-') ? this.entry.slice(1) : '-' + this.entry;
-        } else {
-          this.value = round(-this.value);
-        }
-        this.hasOperand = true;
-      }
-
-      // Percent the way a pocket calculator does it: with a pending + or −
-      // it is a percentage *of the accumulator* (200 + 10% → 220); with × or ÷,
-      // or on its own, it just divides by a hundred.
-      percent() {
-        if (this.error) return;
-        if (this.justEvaluated) this.begin();
-        const n = this.current;
-        const base = (this.op === '+' || this.op === '-') && this.acc !== null ? this.acc : 1;
-        this.value = round(base * n / 100); this.entry = null; this.hasOperand = true;
-      }
-
-      // √, x², eˣ, 10ˣ: applied to the number on the screen, shown as a note
-      // above it so "√(9)" says where the 3 came from. Returns a tape line
-      // when it stands alone, so √9 is remembered like any other sum.
-      unary(name) {
-        if (this.error) return null;
-        if (this.justEvaluated) this.begin();
-        const { f, show } = UNARY[name];
-        const n = this.current;
-        const result = round(f(n));
-        const label = show(fmt(n));
-        if (!Number.isFinite(result)) { this.error = reason(result); return null; }
-        this.value = result; this.entry = null; this.hasOperand = true; this.note = label;
-        return this.op === null ? `${label} = ${fmt(result)}` : null;
-      }
-
-      operator(op) {
-        if (this.error) return;
-        if (!this.hasOperand && this.op !== null) {
-          // Two operators in a row: the second replaces the first.
-          this.op = op; return;
-        }
-        if (this.acc !== null && this.op !== null && !this.justEvaluated) {
-          const b = this.current;
-          this.value = apply(this.acc, this.op, b);
-          if (!Number.isFinite(this.value)) { this.error = reason(this.value, this.op, b); return; }
-        } else {
-          this.value = this.current;
-        }
-        this.acc = this.value; this.op = op; this.entry = null; this.note = '';
-        this.hasOperand = false; this.justEvaluated = false; this.last = null; this.lastExpr = '';
+        this.error = null;
+        if (this.evaluated) { this.clear(); return; }
+        const l = this.last;
+        if (!l) return;
+        if (l.t === 'num' && l.v.length > 1) l.v = l.v.slice(0, -1);
+        else this.tokens.pop();
       }
 
       // Returns the line for the tape, or null when there was nothing to do.
       equals() {
-        if (this.error) return null;
-        let line = null;
-        if (this.acc !== null && this.op !== null) {
-          // "5 + =" is 10, as on a pocket calculator; "=" again repeats the last step.
-          const b = this.justEvaluated ? this.last : this.hasOperand ? this.current : this.acc;
-          const result = apply(this.acc, this.op, b);
-          this.lastExpr = `${fmt(this.acc)} ${SYMBOL[this.op]} ${fmt(b)} =`;
-          line = `${this.lastExpr} ${fmt(result)}`;
-          if (!Number.isFinite(result)) { this.error = reason(result, this.op, b); return line; }
-          this.last = b; this.acc = result; this.value = result;
-        } else {
-          this.value = this.current;
+        this.error = null;
+        if (this.evaluated || this.tokens.length === 0) return null;
+        try {
+          this.result = evaluate(this.tokens, this.deg, this.ans);
+          // Brackets left open are closed on the screen too, so the tape reads sin(π) = 0.
+          let depth = 0;
+          for (const t of this.tokens) { if (t.t === 'lp' || t.t === 'fn') depth++; else if (t.t === 'rp') depth--; }
+          while (depth-- > 0) this.push({ t: 'rp' });
+        } catch (e) {
+          if (!(e instanceof CalcError)) throw e;
+          this.error = e.message === INCOMPLETE ? 'Syntax error' : e.message;
+          return null;
         }
-        this.entry = null; this.note = ''; this.hasOperand = true; this.justEvaluated = true;
-        return line;
+        this.ans = this.result; this.evaluated = true;
+        return `${show(this.tokens)} = ${fmt(this.result)}`;
       }
 
       // The tape gives back a result to carry on from.
-      use(n) {
-        this.clear(); this.value = n; this.hasOperand = true;
-      }
+      use(n) { this.clear(); this.tokens = [{ t: 'num', v: String(n) }]; }
     }
 
-    // ---- The component --------------------------------------------------
+    // ---- The component -------------------------------------------------------
+    // [label, kind, action] with an optional [label, action] for the 2nd layer.
     const KEYS = [
-      ['√', 'sci', 'sqrt'], ['x²', 'sci', 'square'], ['xʸ', 'sci', '^'], ['eˣ', 'sci', 'exp'], ['10ˣ', 'sci', 'pow10'],
-      ['AC', 'fn', 'clear'], ['±', 'fn', 'negate'], ['%', 'fn', 'percent'], ['÷', 'op', '/'],
-      ['7', 'num', '7'], ['8', 'num', '8'], ['9', 'num', '9'], ['×', 'op', '*'],
-      ['4', 'num', '4'], ['5', 'num', '5'], ['6', 'num', '6'], ['−', 'op', '-'],
-      ['1', 'num', '1'], ['2', 'num', '2'], ['3', 'num', '3'], ['+', 'op', '+'],
-      ['⌫', 'num', 'backspace'], ['0', 'num', '0'], ['.', 'num', 'point'], ['=', 'eq', 'equals'],
+      ['2nd', 'sci', 'second'], ['DEG', 'sci', 'deg'], ['sin', 'sci', 'fn:sin', 'sin⁻¹', 'fn:asin'], ['cos', 'sci', 'fn:cos', 'cos⁻¹', 'fn:acos'], ['tan', 'sci', 'fn:tan', 'tan⁻¹', 'fn:atan'],
+      ['x²', 'sci', 'post:²', 'x³', 'post:³'], ['xʸ', 'sci', 'op:^', 'ˣ√y', 'op:root'], ['√', 'sci', 'fn:sqrt', '∛', 'fn:cbrt'], ['ln', 'sci', 'fn:ln', 'eˣ', 'fn:exp'], ['log', 'sci', 'fn:log', '10ˣ', 'fn:pow10'],
+      ['π', 'sci', 'const:π'], ['e', 'sci', 'const:e'], ['1/x', 'sci', 'post:⁻¹', '|x|', 'fn:abs'], ['x!', 'sci', 'post:!', 'mod', 'op:mod'], ['%', 'sci', 'post:%'],
+      ['AC', 'fn', 'clear'], ['(', 'fn', 'lparen'], [')', 'fn', 'rparen'], ['⌫', 'fn', 'backspace'], ['÷', 'op', 'op:/'],
+      ['7', 'num', '7'], ['8', 'num', '8'], ['9', 'num', '9'], ['±', 'fn', 'negate'], ['×', 'op', 'op:*'],
+      ['4', 'num', '4'], ['5', 'num', '5'], ['6', 'num', '6'], ['EE', 'fn', 'ee'], ['−', 'op', 'op:-'],
+      ['1', 'num', '1'], ['2', 'num', '2'], ['3', 'num', '3'], ['Ans', 'fn', 'ans'], ['+', 'op', 'op:+'],
+      ['0', 'num wide', '0'], ['.', 'num', 'point'], ['=', 'eq wide', 'equals'],
     ];
+    const ARIA = {
+      '⌫': 'Backspace', 'AC': 'Clear', '2nd': 'Second functions', 'DEG': 'Degrees or radians', 'x²': 'Square', 'xʸ': 'Power',
+      '√': 'Square root', '1/x': 'Reciprocal', 'x!': 'Factorial', 'EE': 'Exponent', '±': 'Change sign', 'π': 'Pi', 'e': 'e',
+    };
 
-    const ARIA = { '⌫': 'Backspace', 'AC': 'Clear', '√': 'Square root', 'x²': 'Square', 'xʸ': 'Power', 'eˣ': 'e to the power', '10ˣ': '10 to the power' };
     const TAPE_KEY = 'calc:tape';
+    const DEG_KEY = 'calc:deg';
     const TAPE_MAX = 50;
+
+    // The phone's storage may be off or full; neither is a reason for the keys to stop working.
+    const stored = (key, fallback) => { try { const v = localStorage.getItem(key); return v === null ? fallback : JSON.parse(v); } catch { return fallback; } };
+    const store = (key, value) => { try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* nothing to do about it */ } };
 
     class SlowCalc extends HTMLElement {
       constructor() {
         super();
-        this.calc = new Calc();
-        this.tape = this.loadTape();
+        this.calc = new Calc(stored(DEG_KEY, true) !== false);
+        this.second = false;
+        const list = stored(TAPE_KEY, []);
+        this.tape = Array.isArray(list) ? list.filter((t) => t && typeof t.line === 'string') : [];
         const root = this.attachShadow({ mode: 'open' });
         root.innerHTML = `
           <style>
             :host { display: flex; flex-direction: column; }
             .screen {
               flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: flex-end;
-              padding: 8px 20px 12px; text-align: right; overflow: hidden;
+              padding: 4px 16px 10px; text-align: right;
             }
-            .expr { color: var(--muted); font-size: 20px; min-height: 26px; line-height: 26px;
-              white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-            .out { font-size: 56px; font-weight: 300; line-height: 1.1; letter-spacing: -1px;
-              white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
-            .out.long { font-size: 40px; }
-            .out.longer { font-size: 30px; }
-            .out.err { color: var(--warn); font-size: 30px; font-weight: 400; }
+            .mode { color: var(--muted); font-size: 12px; letter-spacing: .08em; min-height: 16px; }
+            .expr {
+              color: var(--ink); font-size: 26px; line-height: 1.3; min-height: 34px; max-height: 40%;
+              overflow-y: auto; overflow-wrap: anywhere; font-variant-numeric: tabular-nums;
+            }
+            .out {
+              font-size: 44px; font-weight: 300; line-height: 1.15; letter-spacing: -1px; min-height: 51px;
+              white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums;
+            }
+            .out.long { font-size: 34px; }
+            .out.longer { font-size: 27px; }
+            .out.preview { color: var(--muted); font-size: 30px; font-weight: 400; }
+            .out.preview.long { font-size: 24px; }
+            .out.preview.longer { font-size: 20px; }
+            .out.preview::before { content: '= '; }
+            .out.preview:empty::before { content: ''; }
+            .out.err { color: var(--warn); font-size: 26px; font-weight: 400; }
             .keys {
-              flex: none; display: grid; grid-template-columns: repeat(20, 1fr); gap: 10px;
-              padding: 8px max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+              flex: none; display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px;
+              padding: 6px max(10px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
             }
-            /* Twenty columns: five function keys across the top, four of
-               everything else, on one grid so the rows share their gutters. */
             button {
-              font: inherit; font-size: 26px; border: 0; border-radius: 16px; color: var(--ink);
-              background: var(--key); height: clamp(52px, 10.5vh, 76px); cursor: pointer; padding: 0;
-              transition: transform .06s; grid-column: span 5;
+              font: inherit; font-size: 24px; border: 0; border-radius: 14px; color: var(--ink);
+              background: var(--key); height: clamp(42px, 7.6vh, 60px); cursor: pointer; padding: 0;
+              transition: transform .06s;
             }
-            button.sci { grid-column: span 4; height: clamp(40px, 6vh, 48px); font-size: 19px; border-radius: 12px; }
-            button.sci sup { font-size: 12px; }
             button:active { transform: scale(.96); }
             button.num:active { background: var(--key-on); }
-            button.fn { font-size: 22px; color: #dfe8e2; }
+            button.wide { grid-column: span 2; }
+            button.fn { font-size: 20px; color: #dfe8e2; }
             button.op { background: var(--op); }
-            button.op:active, button.op.held { background: var(--op-on); }
+            button.op:active { background: var(--op-on); }
             button.eq { background: var(--eq); color: #1b2620; font-weight: 600; }
             button.eq:active { background: var(--eq-on); }
+            button.sci { background: var(--sci); font-size: 17px; height: clamp(34px, 5.2vh, 42px); border-radius: 10px; color: #dfe8e2; }
+            button.sci:active { background: var(--key-on); }
+            button.sci.on { background: var(--op-on); color: var(--ink); }
+            :host(.second) button.sci[data-second] { color: var(--eq); }
 
             .tape {
               position: fixed; inset: 0; background: var(--bg); display: none;
@@ -309,10 +439,10 @@
             /* A long sum loses its left end, never its result. */
             .tape li button span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
             .tape li button b { flex: none; margin-left: 6px; color: var(--ink); font-weight: 500; }
-            .tape li button:disabled b { color: var(--warn); }
             .tape p { color: var(--muted); text-align: center; margin: 40px 20px; font-size: 14px; line-height: 1.5; }
           </style>
           <div class="screen" aria-live="polite">
+            <div class="mode" part="mode"></div>
             <div class="expr" part="expression"></div>
             <div class="out" part="display"></div>
           </div>
@@ -329,19 +459,21 @@
           </div>`;
         this.$ = (s) => root.querySelector(s);
         const keys = this.$('.keys');
-        for (const [label, kind, action] of KEYS) {
+        for (const [label, kind, action, label2, action2] of KEYS) {
           const b = document.createElement('button');
-          b.textContent = label; b.className = kind; b.dataset.action = action;
+          b.textContent = label; b.className = kind;
+          b.dataset.action = action; b.dataset.label = label;
+          if (label2) { b.dataset.second = action2; b.dataset.label2 = label2; }
           b.setAttribute('aria-label', ARIA[label] || label);
-          if (kind === 'sci') b.classList.add('op');
           keys.appendChild(b);
         }
         keys.addEventListener('click', (e) => {
           const b = e.target.closest('button');
-          if (b) this.press(b.dataset.action);
+          if (!b) return;
+          this.press(this.second && b.dataset.second ? b.dataset.second : b.dataset.action);
         });
         this.$('.close').addEventListener('click', () => this.showTape(false));
-        this.$('.wipe').addEventListener('click', () => { this.tape = []; this.saveTape(); this.renderTape(); });
+        this.$('.wipe').addEventListener('click', () => { this.tape = []; store(TAPE_KEY, this.tape); this.renderTape(); });
         this.$('ol').addEventListener('click', (e) => {
           const b = e.target.closest('button');
           if (!b) return;
@@ -351,21 +483,19 @@
       }
 
       connectedCallback() {
+        const SHORT = {
+          '.': 'point', ',': 'point', '+': 'op:+', '-': 'op:-', '*': 'op:*', 'x': 'op:*', 'X': 'op:*', '/': 'op:/', '^': 'op:^',
+          '(': 'lparen', ')': 'rparen', '%': 'post:%', '!': 'post:!', 'Enter': 'equals', '=': 'equals', 'Backspace': 'backspace',
+          's': 'fn:sin', 'c': 'fn:cos', 't': 'fn:tan', 'l': 'fn:ln', 'g': 'fn:log', 'r': 'fn:sqrt', 'q': 'post:²',
+          'p': 'const:π', 'e': 'const:e', 'E': 'ee', 'a': 'ans', 'd': 'deg', 'n': 'second', 'h': 'toggleTape', 'H': 'toggleTape',
+        };
         this.onKey = (e) => {
           if (e.ctrlKey || e.metaKey || e.altKey) return;
           const k = e.key;
           let action = null;
           if (/^[0-9]$/.test(k)) action = k;
-          else if (k === '.' || k === ',') action = 'point';
-          else if (BINARY.includes(k) && k.length === 1) action = k;
-          else if (k === 'x' || k === 'X') action = '*';
-          else if (k === 'r' || k === 'R') action = 'sqrt';
-          else if (k === 'q' || k === 'Q') action = 'square';
-          else if (k === 'Enter' || k === '=') action = 'equals';
-          else if (k === 'Backspace') action = 'backspace';
           else if (k === 'Escape' || k === 'Delete') action = this.$('.tape').classList.contains('open') ? 'closeTape' : 'clear';
-          else if (k === '%') action = 'percent';
-          else if (k === 'h' || k === 'H') action = 'toggleTape';
+          else action = SHORT[k] || null;
           if (!action) return;
           e.preventDefault();
           this.press(action);
@@ -379,42 +509,55 @@
         const c = this.calc;
         if (action === 'closeTape') { this.showTape(false); return; }
         if (action === 'toggleTape') { this.showTape(!this.$('.tape').classList.contains('open')); return; }
+        if (action === 'second') { this.second = !this.second; this.render(); return; }
+        const [kind, arg] = action.split(':');
         if (/^[0-9]$/.test(action)) c.digit(action);
         else if (action === 'point') c.point();
+        else if (action === 'ee') c.ee();
         else if (action === 'backspace') c.backspace();
         else if (action === 'clear') c.clear();
         else if (action === 'negate') c.negate();
-        else if (action === 'percent') c.percent();
+        else if (action === 'lparen') c.lparen();
+        else if (action === 'rparen') c.rparen();
+        else if (action === 'ans') c.ansKey();
+        else if (action === 'deg') { c.deg = !c.deg; store(DEG_KEY, c.deg); }
+        else if (kind === 'op') c.op(arg);
+        else if (kind === 'fn') c.fn(arg);
+        else if (kind === 'post') c.post(arg);
+        else if (kind === 'const') c.constant(arg);
         else if (action === 'equals') {
           const line = c.equals();
-          if (line) this.record(line, c.value);
+          if (line) this.record(line, c.result);
         }
-        else if (action.length === 1 && BINARY.includes(action)) c.operator(action);
-        else if (action in UNARY) {
-          const line = c.unary(action);
-          if (line) this.record(line, c.value);
-        }
+        this.second = false;   // 2nd is for one key, like SHIFT on a Casio
         if (navigator.vibrate) navigator.vibrate(8);
         this.render();
       }
 
       render() {
         const c = this.calc;
+        const { text, kind } = c.display;
         const out = this.$('.out');
-        const text = c.display;
         out.textContent = text;
-        out.className = 'out' + (c.error ? ' err' : text.length > 14 ? ' longer' : text.length > 9 ? ' long' : '');
-        this.$('.expr').textContent = c.expression;
-        for (const b of this.$('.keys').querySelectorAll('button.op')) {
-          b.classList.toggle('held', c.op === b.dataset.action && !c.hasOperand);
+        out.className = 'out ' + kind + (text.length > 15 ? ' longer' : text.length > 11 ? ' long' : '');
+        const expr = this.$('.expr');
+        expr.textContent = c.expression;
+        expr.scrollTop = expr.scrollHeight;
+        this.$('.mode').textContent = c.deg ? 'DEG' : 'RAD';
+        this.classList.toggle('second', this.second);
+        for (const b of this.$('.keys').querySelectorAll('button[data-second]')) {
+          b.textContent = this.second ? b.dataset.label2 : b.dataset.label;
         }
-        this.$('[data-action="clear"]').textContent = (c.hasOperand || c.op !== null || c.error || c.note) ? 'C' : 'AC';
+        this.$('[data-action="second"]').classList.toggle('on', this.second);
+        const degBtn = this.$('[data-action="deg"]');
+        degBtn.textContent = c.deg ? 'DEG' : 'RAD';
+        this.$('[data-action="clear"]').textContent = (c.tokens.length || c.error) ? 'C' : 'AC';
       }
 
       record(line, value) {
         this.tape.unshift({ line, value });
         if (this.tape.length > TAPE_MAX) this.tape.length = TAPE_MAX;
-        this.saveTape();
+        store(TAPE_KEY, this.tape);
         this.renderTape();
       }
 
@@ -447,19 +590,6 @@
       showTape(open) {
         if (open) this.renderTape();
         this.$('.tape').classList.toggle('open', open);
-      }
-
-      // The tape lives in this phone's storage. It may be switched off or
-      // full, and neither is a reason for the keys to stop working.
-      loadTape() {
-        try {
-          const raw = localStorage.getItem(TAPE_KEY);
-          const list = raw ? JSON.parse(raw) : [];
-          return Array.isArray(list) ? list.filter((t) => t && typeof t.line === 'string') : [];
-        } catch { return []; }
-      }
-      saveTape() {
-        try { localStorage.setItem(TAPE_KEY, JSON.stringify(this.tape)); } catch { /* nothing to do about it */ }
       }
     }
 

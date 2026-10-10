@@ -38,10 +38,13 @@ apps/mobile       Capacitor shell (Android + iOS) wrapping the same build.
 *.html (root)     the original single-file apps, STILL LIVE. Do not delete.
 game.html         Trail Jumper, a small canvas platformer. Not a navigator —
                   one file, no build, copied to Pages beside the others.
-calculator.html   a pocket calculator, the same shape: one file, a native web
-                  component, no build. Immediate execution (2 + 3 × 4 = 20),
-                  √ x² xʸ eˣ 10ˣ, results rounded to 12 significant digits,
-                  a tape of past sums in localStorage under `calc:tape`.
+calculator.html   a scientific calculator, the same shape: one file, a
+                  native web component, no build. An expression with
+                  precedence and brackets (2 + 3 × 4 = 14, −3² = −9), trig in
+                  degrees or radians, logs, powers, roots, factorial, π, e,
+                  Ans, a 2nd layer. 15 significant digits, a tape of past
+                  sums in localStorage under `calc:tape`, DEG/RAD under
+                  `calc:deg`.
 ```
 
 Inside the hike app, roughly in the order a walker meets them:
