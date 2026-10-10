@@ -40,8 +40,8 @@ game.html         Trail Jumper, a small canvas platformer. Not a navigator —
                   one file, no build, copied to Pages beside the others.
 calculator.html   a pocket calculator, the same shape: one file, a native web
                   component, no build. Immediate execution (2 + 3 × 4 = 20),
-                  results rounded to 12 significant digits, a tape of past
-                  sums in localStorage under `calc:tape`.
+                  √ x² xʸ eˣ 10ˣ, results rounded to 12 significant digits,
+                  a tape of past sums in localStorage under `calc:tape`.
 ```
 
 Inside the hike app, roughly in the order a walker meets them:

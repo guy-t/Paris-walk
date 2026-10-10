@@ -59,11 +59,26 @@
         case '-': return round(a - b);
         case '*': return round(a * b);
         case '/': return b === 0 ? NaN : round(a / b);
+        case '^': return round(Math.pow(a, b));
       }
       return b;
     };
 
-    const SYMBOL = { '+': '+', '-': '−', '*': '×', '/': '÷' };
+    // The one-number functions. √ of a negative and 0^-1 come out NaN,
+    // e^1000 comes out Infinity; `reason` turns either into words.
+    const UNARY = {
+      sqrt: { f: Math.sqrt, show: (x) => `√(${x})` },
+      square: { f: (x) => x * x, show: (x) => `(${x})²` },
+      exp: { f: Math.exp, show: (x) => `e^(${x})` },
+      pow10: { f: (x) => Math.pow(10, x), show: (x) => `10^(${x})` },
+    };
+    const reason = (n, op, b) => {
+      if (op === '/' && b === 0) return "Can't divide by 0";
+      return Number.isNaN(n) ? 'Invalid input' : 'Too large';
+    };
+
+    const SYMBOL = { '+': '+', '-': '−', '*': '×', '/': '÷', '^': '^' };
+    const BINARY = '+-*/^';
 
     // Format for display: plain up to 12 digits, exponent beyond, no trailing
     // zeros after the point, and "−" rather than a hyphen.
@@ -86,7 +101,7 @@
       constructor() { this.clear(); }
 
       clear() {
-        this.entry = null; this.value = 0; this.hasOperand = false; this.error = false;
+        this.entry = null; this.value = 0; this.hasOperand = false; this.error = null; this.note = '';
         this.fresh();
       }
 
@@ -96,14 +111,14 @@
       }
 
       get display() {
-        if (this.error) return "Can't divide by 0";
+        if (this.error) return this.error;
         return this.entry !== null ? this.entry.replace('-', '−') : fmt(this.value);
       }
 
       get expression() {
         if (this.justEvaluated) return this.lastExpr;
-        if (this.acc === null || this.op === null) return '';
-        return `${fmt(this.acc)} ${SYMBOL[this.op]}`;
+        const pending = (this.acc === null || this.op === null) ? '' : `${fmt(this.acc)} ${SYMBOL[this.op]}`;
+        return [pending, this.note].filter(Boolean).join(' ');
       }
 
       // The number currently being read, whether typed or produced.
@@ -116,7 +131,7 @@
 
       digit(d) {
         this.begin();
-        if (this.entry === null) this.entry = '';
+        if (this.entry === null) { this.entry = ''; this.note = ''; }
         // Twelve digits is what the display can show without an exponent.
         if (this.entry.replace(/[-.]/g, '').length >= SIG) return;
         if (this.entry === '0') this.entry = '';
@@ -127,7 +142,7 @@
 
       point() {
         this.begin();
-        if (this.entry === null) this.entry = '';
+        if (this.entry === null) { this.entry = ''; this.note = ''; }
         if (!this.entry.includes('.')) this.entry += (this.entry === '' || this.entry === '-') ? '0.' : '.';
         this.hasOperand = true;
       }
@@ -162,6 +177,21 @@
         this.value = round(base * n / 100); this.entry = null; this.hasOperand = true;
       }
 
+      // √, x², eˣ, 10ˣ: applied to the number on the screen, shown as a note
+      // above it so "√(9)" says where the 3 came from. Returns a tape line
+      // when it stands alone, so √9 is remembered like any other sum.
+      unary(name) {
+        if (this.error) return null;
+        if (this.justEvaluated) this.begin();
+        const { f, show } = UNARY[name];
+        const n = this.current;
+        const result = round(f(n));
+        const label = show(fmt(n));
+        if (!Number.isFinite(result)) { this.error = reason(result); return null; }
+        this.value = result; this.entry = null; this.hasOperand = true; this.note = label;
+        return this.op === null ? `${label} = ${fmt(result)}` : null;
+      }
+
       operator(op) {
         if (this.error) return;
         if (!this.hasOperand && this.op !== null) {
@@ -169,12 +199,13 @@
           this.op = op; return;
         }
         if (this.acc !== null && this.op !== null && !this.justEvaluated) {
-          this.value = apply(this.acc, this.op, this.current);
-          if (Number.isNaN(this.value)) { this.error = true; return; }
+          const b = this.current;
+          this.value = apply(this.acc, this.op, b);
+          if (!Number.isFinite(this.value)) { this.error = reason(this.value, this.op, b); return; }
         } else {
           this.value = this.current;
         }
-        this.acc = this.value; this.op = op; this.entry = null;
+        this.acc = this.value; this.op = op; this.entry = null; this.note = '';
         this.hasOperand = false; this.justEvaluated = false; this.last = null; this.lastExpr = '';
       }
 
@@ -188,12 +219,12 @@
           const result = apply(this.acc, this.op, b);
           this.lastExpr = `${fmt(this.acc)} ${SYMBOL[this.op]} ${fmt(b)} =`;
           line = `${this.lastExpr} ${fmt(result)}`;
-          if (Number.isNaN(result)) { this.error = true; return line; }
+          if (!Number.isFinite(result)) { this.error = reason(result, this.op, b); return line; }
           this.last = b; this.acc = result; this.value = result;
         } else {
           this.value = this.current;
         }
-        this.entry = null; this.hasOperand = true; this.justEvaluated = true;
+        this.entry = null; this.note = ''; this.hasOperand = true; this.justEvaluated = true;
         return line;
       }
 
@@ -205,6 +236,7 @@
 
     // ---- The component --------------------------------------------------
     const KEYS = [
+      ['√', 'sci', 'sqrt'], ['x²', 'sci', 'square'], ['xʸ', 'sci', '^'], ['eˣ', 'sci', 'exp'], ['10ˣ', 'sci', 'pow10'],
       ['AC', 'fn', 'clear'], ['±', 'fn', 'negate'], ['%', 'fn', 'percent'], ['÷', 'op', '/'],
       ['7', 'num', '7'], ['8', 'num', '8'], ['9', 'num', '9'], ['×', 'op', '*'],
       ['4', 'num', '4'], ['5', 'num', '5'], ['6', 'num', '6'], ['−', 'op', '-'],
@@ -212,6 +244,7 @@
       ['⌫', 'num', 'backspace'], ['0', 'num', '0'], ['.', 'num', 'point'], ['=', 'eq', 'equals'],
     ];
 
+    const ARIA = { '⌫': 'Backspace', 'AC': 'Clear', '√': 'Square root', 'x²': 'Square', 'xʸ': 'Power', 'eˣ': 'e to the power', '10ˣ': '10 to the power' };
     const TAPE_KEY = 'calc:tape';
     const TAPE_MAX = 50;
 
@@ -236,14 +269,18 @@
             .out.longer { font-size: 30px; }
             .out.err { color: var(--warn); font-size: 30px; font-weight: 400; }
             .keys {
-              flex: none; display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
+              flex: none; display: grid; grid-template-columns: repeat(20, 1fr); gap: 10px;
               padding: 8px max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
             }
+            /* Twenty columns: five function keys across the top, four of
+               everything else, on one grid so the rows share their gutters. */
             button {
               font: inherit; font-size: 26px; border: 0; border-radius: 16px; color: var(--ink);
               background: var(--key); height: clamp(52px, 10.5vh, 76px); cursor: pointer; padding: 0;
-              transition: transform .06s;
+              transition: transform .06s; grid-column: span 5;
             }
+            button.sci { grid-column: span 4; height: clamp(40px, 6vh, 48px); font-size: 19px; border-radius: 12px; }
+            button.sci sup { font-size: 12px; }
             button:active { transform: scale(.96); }
             button.num:active { background: var(--key-on); }
             button.fn { font-size: 22px; color: #dfe8e2; }
@@ -295,7 +332,8 @@
         for (const [label, kind, action] of KEYS) {
           const b = document.createElement('button');
           b.textContent = label; b.className = kind; b.dataset.action = action;
-          b.setAttribute('aria-label', label === '⌫' ? 'Backspace' : label === 'AC' ? 'Clear' : label);
+          b.setAttribute('aria-label', ARIA[label] || label);
+          if (kind === 'sci') b.classList.add('op');
           keys.appendChild(b);
         }
         keys.addEventListener('click', (e) => {
@@ -319,8 +357,10 @@
           let action = null;
           if (/^[0-9]$/.test(k)) action = k;
           else if (k === '.' || k === ',') action = 'point';
-          else if ('+-*/'.includes(k) && k.length === 1) action = k;
+          else if (BINARY.includes(k) && k.length === 1) action = k;
           else if (k === 'x' || k === 'X') action = '*';
+          else if (k === 'r' || k === 'R') action = 'sqrt';
+          else if (k === 'q' || k === 'Q') action = 'square';
           else if (k === 'Enter' || k === '=') action = 'equals';
           else if (k === 'Backspace') action = 'backspace';
           else if (k === 'Escape' || k === 'Delete') action = this.$('.tape').classList.contains('open') ? 'closeTape' : 'clear';
@@ -349,7 +389,11 @@
           const line = c.equals();
           if (line) this.record(line, c.value);
         }
-        else if (action.length === 1 && '+-*/'.includes(action)) c.operator(action);
+        else if (action.length === 1 && BINARY.includes(action)) c.operator(action);
+        else if (action in UNARY) {
+          const line = c.unary(action);
+          if (line) this.record(line, c.value);
+        }
         if (navigator.vibrate) navigator.vibrate(8);
         this.render();
       }
@@ -364,7 +408,7 @@
         for (const b of this.$('.keys').querySelectorAll('button.op')) {
           b.classList.toggle('held', c.op === b.dataset.action && !c.hasOperand);
         }
-        this.$('[data-action="clear"]').textContent = (c.hasOperand || c.op !== null || c.error) ? 'C' : 'AC';
+        this.$('[data-action="clear"]').textContent = (c.hasOperand || c.op !== null || c.error || c.note) ? 'C' : 'AC';
       }
 
       record(line, value) {
