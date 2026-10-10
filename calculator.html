@@ -682,7 +682,7 @@
       reset(seed) {
         this.seed = seed; this.rng = seeded(seed);
         this.y = 0; this.vy = 0; this.rot = 0; this.score = 0; this.speed = 100; this.dist = 0;
-        this.cols = []; this.col0 = 0; this.level = 0;
+        this.cols = []; this.col0 = 0; this.level = 0; this.cam = 0;
         for (let i = 0; i < 16; i++) this.cols.push({ h: 0, spike: false, feat: false, passed: false });
         // The skyline: two layers of hills, each a sum of three seeded waves.
         this.hills = [0, 1].map(() => [0, 1, 2].map((k) => ({
@@ -761,6 +761,11 @@
         let gh = -Infinity;
         for (let i = i0; i <= i1; i++) { const c = this.col(i); if (c && c.h !== null) gh = Math.max(gh, c.h * LEVEL); }
 
+        // The camera follows the ground the cube stands on, so a jump from
+        // the top level stays in frame; it glides rather than snaps.
+        const standing = gh === -Infinity ? this.cam : Math.min(gh, 2 * LEVEL);
+        this.cam += (standing - this.cam) * Math.min(1, dt * 6);
+
         if (!this.onGround || this.y > gh) {
           this.onGround = false;
           this.y += this.vy * dt; this.vy -= G * dt;
@@ -807,13 +812,13 @@
       }
 
       draw() {
-        const c = this.ctx, w = this.w, h = this.h, base = h - 10;
+        const c = this.ctx, w = this.w, h = this.h, base = h - 6 + this.cam;
         c.clearRect(0, 0, w, h);
         const bg = c.createLinearGradient(0, 0, 0, h);
         bg.addColorStop(0, '#182a34'); bg.addColorStop(1, '#0e1a20');
         c.fillStyle = bg; c.fillRect(0, 0, w, h);
-        c.fillStyle = '#17323a'; this.skyline(0, 0.25, base - 14);
-        c.fillStyle = '#1a3d3a'; this.skyline(1, 0.5, base - 6);
+        c.fillStyle = '#17323a'; this.skyline(0, 0.25, h - 20 + this.cam * 0.3);
+        c.fillStyle = '#1a3d3a'; this.skyline(1, 0.5, h - 12 + this.cam * 0.5);
 
         // Terrain: a column per cell, shaded by level, with a bright top edge.
         const shades = ['#1c3a30', '#245040', '#2d6650'];
