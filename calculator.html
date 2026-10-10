@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#1b2620">
+  <title>Calculator</title>
+  <style>
+    :root {
+      --bg: #1b2620; --ink: #f3f7f4; --muted: #9fb0a6;
+      --key: rgba(255, 255, 255, .10); --key-on: rgba(255, 255, 255, .28);
+      --op: #2f4f3e; --op-on: #3f6a54; --eq: #e8a33a; --eq-on: #f2b858; --warn: #e2533b;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      background: var(--bg); color: var(--ink); -webkit-tap-highlight-color: transparent;
+      user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+      display: flex; flex-direction: column;
+    }
+    .top {
+      display: flex; justify-content: space-between; align-items: center; flex: none;
+      padding: max(8px, env(safe-area-inset-top)) 8px 0;
+    }
+    .top a, .top button {
+      width: 36px; height: 36px; border-radius: 18px; border: 0; padding: 0; cursor: pointer;
+      background: rgba(255, 255, 255, .12); color: #fff; font-size: 17px; line-height: 36px; text-align: center;
+      text-decoration: none; font-family: inherit;
+    }
+    /* The host's own display wins over the shadow's :host rule, so the
+       column is laid out here: the screen grows, the keys keep their size. */
+    slow-calc { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  </style>
+</head>
+
+<body>
+  <div class="top">
+    <a href="index.html" aria-label="Back to Slow Navigator">✕</a>
+    <button id="tapeBtn" aria-label="Show history" title="History">≡</button>
+  </div>
+  <slow-calc></slow-calc>
+
+  <script>
+    'use strict';
+
+    // ---- The arithmetic ------------------------------------------------
+    // A pocket calculator: immediate execution, left to right, no precedence.
+    // 2 + 3 × 4 = 20 here, as on the one in a kitchen drawer. Every number is
+    // rounded to 12 significant digits before it is shown or chained, so
+    // 0.1 + 0.2 reads 0.3 and a long chain does not drift into 2.9999999.
+    const SIG = 12;
+    const round = (n) => (Number.isFinite(n) && n !== 0) ? +n.toPrecision(SIG) : n;
+
+    const apply = (a, op, b) => {
+      switch (op) {
+        case '+': return round(a + b);
+        case '-': return round(a - b);
+        case '*': return round(a * b);
+        case '/': return b === 0 ? NaN : round(a / b);
+      }
+      return b;
+    };
+
+    const SYMBOL = { '+': '+', '-': '−', '*': '×', '/': '÷' };
+
+    // Format for display: plain up to 12 digits, exponent beyond, no trailing
+    // zeros after the point, and "−" rather than a hyphen.
+    const fmt = (n) => {
+      if (!Number.isFinite(n)) return 'Error';
+      const abs = Math.abs(n);
+      let s = (abs !== 0 && (abs >= 1e12 || abs < 1e-9)) ? n.toExponential(6) : String(n);
+      if (s.includes('e')) {
+        s = s.replace(/\.?0+e/, 'e').replace('e+', 'e');
+      }
+      return s.replace('-', '−');
+    };
+
+    // The state machine behind the keys. `entry` is the text being typed
+    // (null while the display shows a produced number); `acc` and `op` the
+    // pending operation; `hasOperand` says whether a number has been given
+    // since the operator was pressed; `last` is the operand of the previous
+    // "=", so "=" again repeats it.
+    class Calc {
+      constructor() { this.clear(); }
+
+      clear() {
+        this.entry = null; this.value = 0; this.hasOperand = false; this.error = false;
+        this.fresh();
+      }
+
+      // Forget the finished sum: the next number starts a new one.
+      fresh() {
+        this.acc = null; this.op = null; this.last = null; this.justEvaluated = false; this.lastExpr = '';
+      }
+
+      get display() {
+        if (this.error) return "Can't divide by 0";
+        return this.entry !== null ? this.entry.replace('-', '−') : fmt(this.value);
+      }
+
+      get expression() {
+        if (this.justEvaluated) return this.lastExpr;
+        if (this.acc === null || this.op === null) return '';
+        return `${fmt(this.acc)} ${SYMBOL[this.op]}`;
+      }
+
+      // The number currently being read, whether typed or produced.
+      get current() { return this.entry !== null ? +this.entry : this.value; }
+
+      begin() {
+        if (this.error) this.clear();
+        if (this.justEvaluated) { this.fresh(); this.entry = null; }
+      }
+
+      digit(d) {
+        this.begin();
+        if (this.entry === null) this.entry = '';
+        // Twelve digits is what the display can show without an exponent.
+        if (this.entry.replace(/[-.]/g, '').length >= SIG) return;
+        if (this.entry === '0') this.entry = '';
+        if (this.entry === '-0') this.entry = '-';
+        this.entry += d;
+        this.hasOperand = true;
+      }
+
+      point() {
+        this.begin();
+        if (this.entry === null) this.entry = '';
+        if (!this.entry.includes('.')) this.entry += (this.entry === '' || this.entry === '-') ? '0.' : '.';
+        this.hasOperand = true;
+      }
+
+      backspace() {
+        if (this.error) { this.clear(); return; }
+        if (this.entry === null) return;
+        this.entry = this.entry.slice(0, -1);
+        if (this.entry === '' || this.entry === '-') { this.entry = null; this.value = 0; }
+      }
+
+      negate() {
+        if (this.error) return;
+        if (this.justEvaluated) this.begin();
+        if (this.entry === null && this.value === 0) this.entry = '0';  // ± before a number starts a negative one
+        if (this.entry !== null) {
+          this.entry = this.entry.startsWith('-') ? this.entry.slice(1) : '-' + this.entry;
+        } else {
+          this.value = round(-this.value);
+        }
+        this.hasOperand = true;
+      }
+
+      // Percent the way a pocket calculator does it: with a pending + or −
+      // it is a percentage *of the accumulator* (200 + 10% → 220); with × or ÷,
+      // or on its own, it just divides by a hundred.
+      percent() {
+        if (this.error) return;
+        if (this.justEvaluated) this.begin();
+        const n = this.current;
+        const base = (this.op === '+' || this.op === '-') && this.acc !== null ? this.acc : 1;
+        this.value = round(base * n / 100); this.entry = null; this.hasOperand = true;
+      }
+
+      operator(op) {
+        if (this.error) return;
+        if (!this.hasOperand && this.op !== null) {
+          // Two operators in a row: the second replaces the first.
+          this.op = op; return;
+        }
+        if (this.acc !== null && this.op !== null && !this.justEvaluated) {
+          this.value = apply(this.acc, this.op, this.current);
+          if (Number.isNaN(this.value)) { this.error = true; return; }
+        } else {
+          this.value = this.current;
+        }
+        this.acc = this.value; this.op = op; this.entry = null;
+        this.hasOperand = false; this.justEvaluated = false; this.last = null; this.lastExpr = '';
+      }
+
+      // Returns the line for the tape, or null when there was nothing to do.
+      equals() {
+        if (this.error) return null;
+        let line = null;
+        if (this.acc !== null && this.op !== null) {
+          // "5 + =" is 10, as on a pocket calculator; "=" again repeats the last step.
+          const b = this.justEvaluated ? this.last : this.hasOperand ? this.current : this.acc;
+          const result = apply(this.acc, this.op, b);
+          this.lastExpr = `${fmt(this.acc)} ${SYMBOL[this.op]} ${fmt(b)} =`;
+          line = `${this.lastExpr} ${fmt(result)}`;
+          if (Number.isNaN(result)) { this.error = true; return line; }
+          this.last = b; this.acc = result; this.value = result;
+        } else {
+          this.value = this.current;
+        }
+        this.entry = null; this.hasOperand = true; this.justEvaluated = true;
+        return line;
+      }
+
+      // The tape gives back a result to carry on from.
+      use(n) {
+        this.clear(); this.value = n; this.hasOperand = true;
+      }
+    }
+
+    // ---- The component --------------------------------------------------
+    const KEYS = [
+      ['AC', 'fn', 'clear'], ['±', 'fn', 'negate'], ['%', 'fn', 'percent'], ['÷', 'op', '/'],
+      ['7', 'num', '7'], ['8', 'num', '8'], ['9', 'num', '9'], ['×', 'op', '*'],
+      ['4', 'num', '4'], ['5', 'num', '5'], ['6', 'num', '6'], ['−', 'op', '-'],
+      ['1', 'num', '1'], ['2', 'num', '2'], ['3', 'num', '3'], ['+', 'op', '+'],
+      ['⌫', 'num', 'backspace'], ['0', 'num', '0'], ['.', 'num', 'point'], ['=', 'eq', 'equals'],
+    ];
+
+    const TAPE_KEY = 'calc:tape';
+    const TAPE_MAX = 50;
+
+    class SlowCalc extends HTMLElement {
+      constructor() {
+        super();
+        this.calc = new Calc();
+        this.tape = this.loadTape();
+        const root = this.attachShadow({ mode: 'open' });
+        root.innerHTML = `
+          <style>
+            :host { display: flex; flex-direction: column; }
+            .screen {
+              flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: flex-end;
+              padding: 8px 20px 12px; text-align: right; overflow: hidden;
+            }
+            .expr { color: var(--muted); font-size: 20px; min-height: 26px; line-height: 26px;
+              white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            .out { font-size: 56px; font-weight: 300; line-height: 1.1; letter-spacing: -1px;
+              white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+            .out.long { font-size: 40px; }
+            .out.longer { font-size: 30px; }
+            .out.err { color: var(--warn); font-size: 30px; font-weight: 400; }
+            .keys {
+              flex: none; display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
+              padding: 8px max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+            }
+            button {
+              font: inherit; font-size: 26px; border: 0; border-radius: 16px; color: var(--ink);
+              background: var(--key); height: clamp(52px, 10.5vh, 76px); cursor: pointer; padding: 0;
+              transition: transform .06s;
+            }
+            button:active { transform: scale(.96); }
+            button.num:active { background: var(--key-on); }
+            button.fn { font-size: 22px; color: #dfe8e2; }
+            button.op { background: var(--op); }
+            button.op:active, button.op.held { background: var(--op-on); }
+            button.eq { background: var(--eq); color: #1b2620; font-weight: 600; }
+            button.eq:active { background: var(--eq-on); }
+
+            .tape {
+              position: fixed; inset: 0; background: var(--bg); display: none;
+              flex-direction: column; padding: max(8px, env(safe-area-inset-top)) 0 env(safe-area-inset-bottom);
+            }
+            .tape.open { display: flex; }
+            .tape header { display: flex; align-items: center; justify-content: space-between; padding: 0 14px 8px 20px; }
+            .tape h2 { font-size: 16px; font-weight: 600; margin: 0; }
+            .tape header div { display: flex; gap: 8px; }
+            .tape header button { height: 36px; border-radius: 18px; font-size: 14px; padding: 0 14px; }
+            .tape header button.close { width: 36px; padding: 0; font-size: 17px; }
+            .tape ol { list-style: none; margin: 0; padding: 0 12px; overflow-y: auto; flex: 1; }
+            .tape li { margin: 0 0 6px; }
+            .tape li button {
+              width: 100%; height: auto; padding: 10px 14px; font-size: 18px; display: flex; justify-content: flex-end;
+              border-radius: 12px; background: rgba(255, 255, 255, .06); color: var(--muted);
+              font-variant-numeric: tabular-nums; white-space: nowrap;
+            }
+            /* A long sum loses its left end, never its result. */
+            .tape li button span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+            .tape li button b { flex: none; color: var(--ink); font-weight: 500; }
+            .tape li button:disabled b { color: var(--warn); }
+            .tape p { color: var(--muted); text-align: center; margin: 40px 20px; font-size: 14px; line-height: 1.5; }
+          </style>
+          <div class="screen" aria-live="polite">
+            <div class="expr" part="expression"></div>
+            <div class="out" part="display"></div>
+          </div>
+          <div class="keys"></div>
+          <div class="tape" role="dialog" aria-label="History">
+            <header>
+              <h2>History</h2>
+              <div>
+                <button class="fn wipe">Clear</button>
+                <button class="fn close" aria-label="Close history">✕</button>
+              </div>
+            </header>
+            <ol></ol>
+          </div>`;
+        this.$ = (s) => root.querySelector(s);
+        const keys = this.$('.keys');
+        for (const [label, kind, action] of KEYS) {
+          const b = document.createElement('button');
+          b.textContent = label; b.className = kind; b.dataset.action = action;
+          b.setAttribute('aria-label', label === '⌫' ? 'Backspace' : label === 'AC' ? 'Clear' : label);
+          keys.appendChild(b);
+        }
+        keys.addEventListener('click', (e) => {
+          const b = e.target.closest('button');
+          if (b) this.press(b.dataset.action);
+        });
+        this.$('.close').addEventListener('click', () => this.showTape(false));
+        this.$('.wipe').addEventListener('click', () => { this.tape = []; this.saveTape(); this.renderTape(); });
+        this.$('ol').addEventListener('click', (e) => {
+          const b = e.target.closest('button');
+          if (!b) return;
+          this.calc.use(+b.dataset.value); this.showTape(false); this.render();
+        });
+        this.render();
+      }
+
+      connectedCallback() {
+        this.onKey = (e) => {
+          if (e.ctrlKey || e.metaKey || e.altKey) return;
+          const k = e.key;
+          let action = null;
+          if (/^[0-9]$/.test(k)) action = k;
+          else if (k === '.' || k === ',') action = 'point';
+          else if ('+-*/'.includes(k) && k.length === 1) action = k;
+          else if (k === 'x' || k === 'X') action = '*';
+          else if (k === 'Enter' || k === '=') action = 'equals';
+          else if (k === 'Backspace') action = 'backspace';
+          else if (k === 'Escape' || k === 'Delete') action = this.$('.tape').classList.contains('open') ? 'closeTape' : 'clear';
+          else if (k === '%') action = 'percent';
+          else if (k === 'h' || k === 'H') action = 'toggleTape';
+          if (!action) return;
+          e.preventDefault();
+          this.press(action);
+        };
+        window.addEventListener('keydown', this.onKey);
+      }
+
+      disconnectedCallback() { window.removeEventListener('keydown', this.onKey); }
+
+      press(action) {
+        const c = this.calc;
+        if (action === 'closeTape') { this.showTape(false); return; }
+        if (action === 'toggleTape') { this.showTape(!this.$('.tape').classList.contains('open')); return; }
+        if (/^[0-9]$/.test(action)) c.digit(action);
+        else if (action === 'point') c.point();
+        else if (action === 'backspace') c.backspace();
+        else if (action === 'clear') c.clear();
+        else if (action === 'negate') c.negate();
+        else if (action === 'percent') c.percent();
+        else if (action === 'equals') {
+          const line = c.equals();
+          if (line) this.record(line, c.value);
+        }
+        else if (action.length === 1 && '+-*/'.includes(action)) c.operator(action);
+        if (navigator.vibrate) navigator.vibrate(8);
+        this.render();
+      }
+
+      render() {
+        const c = this.calc;
+        const out = this.$('.out');
+        const text = c.display;
+        out.textContent = text;
+        out.className = 'out' + (c.error ? ' err' : text.length > 14 ? ' longer' : text.length > 9 ? ' long' : '');
+        this.$('.expr').textContent = c.expression;
+        for (const b of this.$('.keys').querySelectorAll('button.op')) {
+          b.classList.toggle('held', c.op === b.dataset.action && !c.hasOperand);
+        }
+        this.$('[data-action="clear"]').textContent = (c.hasOperand || c.op !== null || c.error) ? 'C' : 'AC';
+      }
+
+      record(line, value) {
+        this.tape.unshift({ line, value });
+        if (this.tape.length > TAPE_MAX) this.tape.length = TAPE_MAX;
+        this.saveTape();
+        this.renderTape();
+      }
+
+      renderTape() {
+        const ol = this.$('ol');
+        ol.innerHTML = '';
+        if (this.tape.length === 0) {
+          const p = document.createElement('p');
+          p.textContent = 'Nothing yet. Each = you press is kept here, and tapping a line carries its result on.';
+          ol.appendChild(p);
+          return;
+        }
+        for (const { line, value } of this.tape) {
+          const li = document.createElement('li');
+          const b = document.createElement('button');
+          const i = line.lastIndexOf(' = ');
+          const span = document.createElement('span');
+          span.textContent = line.slice(0, i + 3);
+          b.appendChild(span);
+          const strong = document.createElement('b');
+          strong.textContent = line.slice(i + 3);
+          b.appendChild(strong);
+          b.dataset.value = String(value);
+          if (!Number.isFinite(value)) b.disabled = true;
+          li.appendChild(b);
+          ol.appendChild(li);
+        }
+      }
+
+      showTape(open) {
+        if (open) this.renderTape();
+        this.$('.tape').classList.toggle('open', open);
+      }
+
+      // The tape lives in this phone's storage. It may be switched off or
+      // full, and neither is a reason for the keys to stop working.
+      loadTape() {
+        try {
+          const raw = localStorage.getItem(TAPE_KEY);
+          const list = raw ? JSON.parse(raw) : [];
+          return Array.isArray(list) ? list.filter((t) => t && typeof t.line === 'string') : [];
+        } catch { return []; }
+      }
+      saveTape() {
+        try { localStorage.setItem(TAPE_KEY, JSON.stringify(this.tape)); } catch { /* nothing to do about it */ }
+      }
+    }
+
+    customElements.define('slow-calc', SlowCalc);
+    document.getElementById('tapeBtn').addEventListener('click', () => {
+      document.querySelector('slow-calc').press('toggleTape');
+    });
+  </script>
+</body>
+
+</html>
