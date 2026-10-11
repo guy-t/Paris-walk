@@ -6,6 +6,6 @@ export default defineConfig({
     // files that need one (GPX parsing) opt in with a @vitest-environment
     // docblock.
     environment: "node",
-    include: ["packages/*/src/**/*.test.ts", "apps/*/src/**/*.test.ts"],
+    include: ["packages/*/src/**/*.test.ts", "apps/*/src/**/*.test.ts", "scripts/*.test.ts"],
   },
 });

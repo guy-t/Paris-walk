@@ -65,6 +65,10 @@
     const PLAIN_MAX = 1e15;   // written out in full below this, as a power of ten above
     const round = (n) => (Number.isFinite(n) && n !== 0) ? +n.toPrecision(SIG) : n;
 
+    // Thin spaces every three digits of an integer part of five or more,
+    // so 1234567 reads as 1 234 567. The fraction is left alone.
+    const group = (s) => s.replace(/^(−?)(\d{5,})/, (m, sign, digits) => sign + digits.replace(/\B(?=(\d{3})+$)/g, '\u2009'));
+
     // Plain up to 15 digits, exponent beyond, no trailing zeros, "−" not "-".
     const fmt = (n) => {
       if (!Number.isFinite(n)) return 'Error';
@@ -72,7 +76,7 @@
       let s = (abs !== 0 && (abs >= PLAIN_MAX || abs < 1e-9)) ? n.toExponential(SIG - 1) : n.toPrecision(SIG);
       if (!s.includes('e') && s.includes('.')) s = s.replace(/\.?0+$/, '');
       if (s.includes('e')) s = s.replace(/\.?0+e/, 'e').replace('e+', 'e').replace('e', 'ᴇ');
-      return s.replace(/-/g, '−');
+      return group(s.replace(/-/g, '−'));
     };
 
     class CalcError extends Error { }
@@ -132,9 +136,10 @@
     const endsOperand = (t) => !!t && (t.t in VALUE || t.t === 'rp' || t.t === 'post');
 
     // A minus that is a sign sits against its number: "5 − −2", "−3²".
-    const show = (tokens) => tokens.map((t, i) => {
+    const piece = (tokens, i) => {
+      const t = tokens[i];
       switch (t.t) {
-        case 'num': return t.v.replace('e+', 'e').replace('e', 'ᴇ').replace(/-/g, '−');
+        case 'num': return group(t.v.replace('e+', 'e').replace('e', 'ᴇ').replace(/-/g, '−'));
         case 'op': return t.v === '-' && !endsOperand(tokens[i - 1]) ? '−' : OP_LABEL[t.v];
         case 'fn': return FN_LABEL[t.v] + '(';
         case 'lp': return '(';
@@ -144,7 +149,16 @@
         case 'rand': return 'Ran#';
         case 'post': return t.v;
       }
-    }).join('').replace(/\s+/g, ' ').trim();
+    };
+    // The pieces, each trimmed at the ends of the expression, so a row of
+    // spans reads exactly as the joined string does.
+    const pieces = (tokens) => tokens.map((t, i) => {
+      let p = piece(tokens, i);
+      if (i === 0) p = p.replace(/^\s+/, '');
+      if (i === tokens.length - 1) p = p.replace(/\s+$/, '');
+      return p;
+    });
+    const show = (tokens) => pieces(tokens).join('');
 
     // Recursive descent, lowest precedence first:
     //   + −  <  × ÷ mod  <  writing two things together  <  unary −  <  ^ ˣ√ (right)  <  postfix  <  atoms
@@ -198,7 +212,14 @@
         const t = tokens[i++];
         if (!t) fail(INCOMPLETE);
         switch (t.t) {
-          case 'num': { const n = Number(t.v); if (Number.isNaN(n)) fail(INCOMPLETE); return n; }
+          case 'num': {
+            // Digits typed at a caret before a number are their own token; read together they are one number.
+            let v = t.v;
+            while (peek() && peek().t === 'num') v += tokens[i++].v;
+            const n = Number(v);
+            if (Number.isNaN(n)) fail(INCOMPLETE);
+            return n;
+          }
           case 'const': return t.v === 'π' ? Math.PI : Math.E;
           case 'ans': return ans;
           case 'rand': return t.v;
@@ -222,9 +243,19 @@
         this.clear();
       }
 
-      clear() { this.tokens = []; this.result = null; this.error = null; this.evaluated = false; this.recalled = false; }
+      clear() { this.tokens = []; this.cur = 0; this.result = null; this.error = null; this.evaluated = false; this.recalled = false; }
 
-      get last() { return this.tokens[this.tokens.length - 1]; }
+      // The token before the caret: what a digit extends, what a postfix applies to.
+      get last() { return this.tokens[this.cur - 1]; }
+
+      // Moving the caret after "=" reopens the expression for editing, as a
+      // Casio's replay does; the answer line empties until "=" again.
+      moveCaret(d) {
+        if (this.evaluated) { this.evaluated = false; this.result = null; this.recalled = false; }
+        this.error = null;
+        this.cur = Math.max(0, Math.min(this.tokens.length, this.cur + d));
+      }
+      setCaret(i) { this.moveCaret(i - this.cur); }
       get expression() { return show(this.tokens) + (this.evaluated && !this.recalled ? ' =' : ''); }
 
       // What the big line shows, and how: the answer after "=", an error,
@@ -233,7 +264,7 @@
         if (this.error) return { text: this.error, kind: 'err' };
         if (this.evaluated) return { text: fmt(this.result), kind: 'result' };
         if (this.tokens.length === 0) return { text: '0', kind: 'result' };
-        if (this.tokens.length === 1 && this.last.t === 'num') return { text: show(this.tokens), kind: 'result' };
+        if (this.tokens.length === 1 && this.tokens[0].t === 'num') return { text: show(this.tokens), kind: 'result' };
         try { return { text: fmt(evaluate(this.tokens, this.deg, this.ans)), kind: 'preview' }; }
         catch (e) { return { text: '', kind: 'preview' }; }
       }
@@ -245,10 +276,11 @@
         if (!this.evaluated) return;
         const carry = this.result === this.ans ? { t: 'ans' } : { t: 'num', v: String(this.result) };
         this.tokens = continues ? [carry] : [];
+        this.cur = this.tokens.length;
         this.result = null; this.evaluated = false; this.recalled = false;
       }
 
-      push(token) { this.tokens.push(token); }
+      push(token) { this.tokens.splice(this.cur, 0, token); this.cur++; }
 
       digit(d) {
         this.begin(false);
@@ -288,12 +320,11 @@
           l.v = m + 'e' + (e.startsWith('-') ? e.slice(1) : '-' + e);
           return;
         }
-        const n = this.tokens.length;
-        const target = endsOperand(l) ? n - 1 : n;      // before the last operand, or where the next one goes
+        const target = endsOperand(l) ? this.cur - 1 : this.cur;   // before the operand at the caret, or where the next one goes
         const before = this.tokens[target - 1];
         const beforeThat = this.tokens[target - 2];
-        if (before && before.t === 'op' && before.v === '-' && !endsOperand(beforeThat)) this.tokens.splice(target - 1, 1);
-        else this.tokens.splice(target, 0, { t: 'op', v: '-' });
+        if (before && before.t === 'op' && before.v === '-' && !endsOperand(beforeThat)) { this.tokens.splice(target - 1, 1); this.cur--; }
+        else { this.tokens.splice(target, 0, { t: 'op', v: '-' }); this.cur++; }
       }
 
       op(v) {
@@ -322,7 +353,7 @@
       rparen() {
         this.begin(true);
         let depth = 0;
-        for (const t of this.tokens) { if (t.t === 'lp' || t.t === 'fn') depth++; else if (t.t === 'rp') depth--; }
+        for (const t of this.tokens.slice(0, this.cur)) { if (t.t === 'lp' || t.t === 'fn') depth++; else if (t.t === 'rp') depth--; }
         if (depth > 0 && endsOperand(this.last)) this.push({ t: 'rp' });
       }
 
@@ -337,7 +368,7 @@
         const l = this.last;
         if (!l) return;
         if (l.t === 'num' && l.v.length > 1) l.v = l.v.slice(0, -1);
-        else this.tokens.pop();
+        else { this.tokens.splice(this.cur - 1, 1); this.cur--; }
       }
 
       // Returns the line for the tape, or null when there was nothing to do.
@@ -349,7 +380,8 @@
           // Brackets left open are closed on the screen too, so the tape reads sin(π) = 0.
           let depth = 0;
           for (const t of this.tokens) { if (t.t === 'lp' || t.t === 'fn') depth++; else if (t.t === 'rp') depth--; }
-          while (depth-- > 0) this.push({ t: 'rp' });
+          while (depth-- > 0) this.tokens.push({ t: 'rp' });
+          this.cur = this.tokens.length;
         } catch (e) {
           if (!(e instanceof CalcError)) throw e;
           this.error = e.message === INCOMPLETE ? 'Syntax error' : e.message;
@@ -361,7 +393,7 @@
 
       // The tape gives back a result to carry on from: an operator continues
       // from it, a digit starts afresh, as after "=".
-      use(n) { this.clear(); this.tokens = [{ t: 'num', v: String(n) }]; this.result = n; this.evaluated = true; this.recalled = true; }
+      use(n) { this.clear(); this.tokens = [{ t: 'num', v: String(n) }]; this.cur = 1; this.result = n; this.evaluated = true; this.recalled = true; }
     }
 
     // ---- The component -------------------------------------------------------
@@ -408,8 +440,17 @@
             .mode { color: var(--muted); font-size: 12px; letter-spacing: .08em; min-height: 16px; }
             .expr {
               color: var(--ink); font-size: 26px; line-height: 1.3; min-height: 34px; max-height: 40%;
-              overflow-y: auto; overflow-wrap: anywhere; font-variant-numeric: tabular-nums;
+              overflow-y: auto; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; white-space: pre-wrap;
             }
+            .expr span { cursor: text; }
+            .expr .caret {
+              display: inline-block; width: 2px; height: 1em; margin: 0 -1px; vertical-align: -0.15em;
+              background: var(--eq); animation: blink 1s steps(2, start) infinite;
+            }
+            .expr.done .caret { display: none; }
+            @keyframes blink { to { visibility: hidden; } }
+            .out { cursor: pointer; }
+            .mode .copied { color: var(--eq); }
             .out {
               font-size: 44px; font-weight: 300; line-height: 1.15; letter-spacing: -1px; min-height: 51px;
               white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums;
@@ -497,6 +538,15 @@
           if (!b) return;
           this.press(this.second && b.dataset.second ? b.dataset.second : b.dataset.action);
         });
+        // Tap a token to put the caret before or after it; tap the result to copy it.
+        this.$('.expr').addEventListener('click', (e) => {
+          const t = e.target.closest('span[data-i]');
+          if (!t) return;
+          const r = t.getBoundingClientRect();
+          const i = +t.dataset.i + (e.clientX > r.left + r.width / 2 ? 1 : 0);
+          this.calc.setCaret(i); this.render();
+        });
+        this.$('.out').addEventListener('click', () => this.copy());
         this.$('.close').addEventListener('click', () => this.showTape(false));
         this.$('.wipe').addEventListener('click', () => { this.tape = []; store(TAPE_KEY, this.tape); this.renderTape(); });
         this.$('ol').addEventListener('click', (e) => {
@@ -519,6 +569,10 @@
           const k = e.key;
           let action = null;
           if (/^[0-9]$/.test(k)) action = k;
+          else if (k === 'ArrowLeft') action = 'left';
+          else if (k === 'ArrowRight') action = 'right';
+          else if (k === 'Home') action = 'home';
+          else if (k === 'End') action = 'end';
           else if (k === 'Escape' || k === 'Delete') action = this.$('.tape').classList.contains('open') ? 'closeTape' : 'clear';
           else action = SHORT[k] || null;
           if (!action) return;
@@ -546,6 +600,10 @@
         else if (action === 'rparen') c.rparen();
         else if (action === 'ans') c.ansKey();
         else if (action === 'rand') c.random();
+        else if (action === 'left') c.moveCaret(-1);
+        else if (action === 'right') c.moveCaret(1);
+        else if (action === 'home') c.setCaret(0);
+        else if (action === 'end') c.setCaret(c.tokens.length);
         else if (action === 'deg') { c.deg = !c.deg; store(DEG_KEY, c.deg); }
         else if (kind === 'op') c.op(arg);
         else if (kind === 'fn') c.fn(arg);
@@ -567,9 +625,20 @@
         out.textContent = text;
         out.className = 'out ' + kind + (text.length > 15 ? ' longer' : text.length > 11 ? ' long' : '');
         const expr = this.$('.expr');
-        expr.textContent = c.expression;
+        expr.textContent = '';
+        const parts = pieces(c.tokens);
+        const editing = !c.evaluated && !c.error;
+        parts.forEach((p, i) => {
+          if (editing && i === c.cur) expr.appendChild(this.caretEl());
+          const span = document.createElement('span');
+          span.dataset.i = i; span.textContent = p;
+          expr.appendChild(span);
+        });
+        if (editing && c.cur === parts.length) expr.appendChild(this.caretEl());
+        if (c.evaluated && !c.recalled) expr.appendChild(document.createTextNode(' ='));
+        expr.classList.toggle('done', !editing);
         expr.scrollTop = expr.scrollHeight;
-        this.$('.mode').textContent = c.deg ? 'DEG' : 'RAD';
+        if (!this.copiedUntil || Date.now() > this.copiedUntil) this.$('.mode').textContent = c.deg ? 'DEG' : 'RAD';
         this.classList.toggle('second', this.second);
         for (const b of this.$('.keys').querySelectorAll('button[data-second]')) {
           b.textContent = this.second ? b.dataset.label2 : b.dataset.label;
@@ -578,6 +647,20 @@
         const degBtn = this.$('[data-action="deg"]');
         degBtn.textContent = c.deg ? 'DEG' : 'RAD';
         this.$('[data-action="clear"]').textContent = (c.tokens.length || c.error) ? 'C' : 'AC';
+      }
+
+      caretEl() { const el = document.createElement('span'); el.className = 'caret'; el.setAttribute('aria-hidden', 'true'); return el; }
+
+      // Copy the number on the screen, and say so for a moment.
+      copy() {
+        const { text, kind } = this.calc.display;
+        if (kind === 'err' || !text || !navigator.clipboard) return;
+        navigator.clipboard.writeText(text.replace(/\u2009/g, '').replace(/−/g, '-').replace('ᴇ', 'e')).then(() => {
+          const mode = this.$('.mode');
+          mode.innerHTML = ''; const b = document.createElement('span'); b.className = 'copied'; b.textContent = 'copied'; mode.appendChild(b);
+          this.copiedUntil = Date.now() + 1200;
+          setTimeout(() => { this.copiedUntil = 0; this.render(); }, 1250);
+        }).catch(() => { /* nothing to say */ });
       }
 
       record(line, value) {
@@ -675,8 +758,7 @@
         window.addEventListener('pointerup', this.onRelease);
         window.addEventListener('pointercancel', this.onRelease);
         document.addEventListener('visibilitychange', this.onHide);
-        this.ro = new ResizeObserver(() => this.fit());
-        this.ro.observe(this);
+        if (typeof ResizeObserver !== 'undefined') { this.ro = new ResizeObserver(() => this.fit()); this.ro.observe(this); }
         this.fit();
       }
       disconnectedCallback() {
@@ -685,7 +767,7 @@
         window.removeEventListener('pointerup', this.onRelease);
         window.removeEventListener('pointercancel', this.onRelease);
         document.removeEventListener('visibilitychange', this.onHide);
-        this.ro.disconnect();
+        if (this.ro) this.ro.disconnect();
       }
 
       // Holding the button or the bar keeps the cube jumping as it lands,
@@ -698,6 +780,7 @@
       // The world is always 52 units tall, whatever size the widget is
       // drawn at, so a bigger widget shows a bigger cube, not more ground.
       fit() {
+        if (!this.ctx) return;
         const dpr = window.devicePixelRatio || 1;
         const r = this.getBoundingClientRect();
         const zoom = Math.max(r.height, 1) / 52;
@@ -754,7 +837,13 @@
           this.cols.push({ h: this.level, spike: false, feat: true, passed: false });
           flat(F + spare()); return;
         }
-        if (this.level > 0) { this.level = r() < 0.5 ? 0 : this.level - 1; flat(F + spare()); return; }
+        if (this.level > 0) {
+          // The drop is a cell of its own, so the F plain cells after it are
+          // the same promise a step up makes — a falling cube cannot jump.
+          this.level = r() < 0.5 ? 0 : this.level - 1;
+          this.cols.push({ h: this.level, spike: false, feat: false, passed: false });
+          flat(F + spare()); return;
+        }
         flat(3 + spare());
       }
 
@@ -867,6 +956,7 @@
       }
 
       draw() {
+        if (!this.ctx) return;
         const c = this.ctx, w = this.w, h = this.h, base = h - 6 + this.cam;
         c.clearRect(0, 0, w, h);
         const bg = c.createLinearGradient(0, 0, 0, h);

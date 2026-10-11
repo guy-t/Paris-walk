@@ -52,7 +52,11 @@ calculator.html   a scientific calculator, the same shape: one file, a
                   space to start and to jump, hold to keep jumping, best
                   under `calc:dash`; it draws only while a run is on and
                   pauses under the history panel. Writing two things
-                  together (2π) binds tighter than ÷, as on a Casio.
+                  together (2π) binds tighter than ÷, as on a Casio. A caret
+                  (tap a token, or ← →) edits anywhere in the expression;
+                  tapping the result copies it. `scripts/calculator.test.ts`
+                  loads the file into jsdom and drives the arithmetic and the
+                  terrain generator, so CI guards both.
 ```
 
 Inside the hike app, roughly in the order a walker meets them:
@@ -966,7 +970,7 @@ Pages CDN caches 404s, so a path a deploy just added keeps answering 404.
 ```bash
 pnpm install
 pnpm typecheck          # tsc --build across all projects
-pnpm test               # vitest, 362 tests
+pnpm test               # vitest, 421 tests
 pnpm build              # web build for Pages
 pnpm --filter @slownav/web build:native   # payload for the APK
 pnpm --filter @slownav/web dev            # local dev server
