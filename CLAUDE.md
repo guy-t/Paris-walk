@@ -44,8 +44,10 @@ calculator.html   a scientific calculator, the same shape: one file, a
                   degrees or radians, logs, powers, roots, factorial, π, e,
                   Ans, Ran#, a 2nd layer. 15 significant digits, a tape of past
                   sums in localStorage under `calc:tape`, DEG/RAD under
-                  `calc:deg`. In its top-left corner a Geometry Dash-style
-                  runner (`<dash-widget>`, 176×72, a 52-unit world scaled to fit) over terrain generated from a
+                  `calc:deg`. Under its top bar, the width of the phone, a
+                  Geometry Dash-style runner (`<dash-widget>`, a 52-unit
+                  world scaled to a band that follows the screen's height and
+                  yields to the calculator's minimum) over terrain generated from a
                   seed per attempt — steps, pits, spikes, a skyline, and
                   past 500 units jump pads before walls four levels tall and
                   jump orbs over pits too wide for one jump — with a whole
