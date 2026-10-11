@@ -46,9 +46,11 @@ calculator.html   a scientific calculator, the same shape: one file, a
                   sums in localStorage under `calc:tape`, DEG/RAD under
                   `calc:deg`. In its top-left corner a Geometry Dash-style
                   runner (`<dash-widget>`, 176×72, a 52-unit world scaled to fit) over terrain generated from a
-                  seed per attempt — steps, pits, spikes, a skyline — with a
-                  whole jump's worth of flat after every feature so it is
-                  always fair: tap the widget, the ▲ button top-right or
+                  seed per attempt — steps, pits, spikes, a skyline, and
+                  past 500 units jump pads before walls four levels tall and
+                  jump orbs over pits too wide for one jump — with a whole
+                  jump's worth of flat after every feature so it is always
+                  fair (a perfect pilot survives 60 seeds × 40 s): tap the widget, the ▲ button top-right or
                   space to start and to jump, hold to keep jumping, best
                   under `calc:dash`; it draws only while a run is on and
                   pauses under the history panel. Writing two things

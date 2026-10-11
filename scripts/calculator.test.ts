@@ -39,7 +39,8 @@ type Calc = {
   use(n: number): void;
 };
 type Api = { Calc: new (deg: boolean) => Calc; fmt: (n: number) => string; seeded: (s: number) => () => number };
-type Widget = { reset(seed: number): void; extend(): void; cols: { h: number | null; spike: boolean }[]; speed: number };
+type Col = { h: number | null; spike: boolean; pad: boolean };
+type Widget = { reset(seed: number): void; extend(): void; cols: Col[]; col0: number; orbs: { x: number; y: number }[]; speed: number; dist: number };
 
 let api: Api;
 let widget: Widget;
@@ -166,8 +167,10 @@ describe("the calculator's arithmetic", () => {
 });
 
 describe("the runner's terrain", () => {
-  const sample = (seed: number, cells: number) => {
+  // reset() starts the run at distance 0; `dist` moves it on, past where pads and orbs unlock.
+  const sample = (seed: number, cells: number, dist = 0) => {
     widget.reset(seed);
+    widget.dist = dist;
     while (widget.cols.length < cells) widget.extend();
     return widget.cols;
   };
@@ -178,16 +181,23 @@ describe("the runner's terrain", () => {
     expect(JSON.stringify(sample(43, 300))).not.toBe(a);
   });
 
-  it("is fair: pits of at most three cells, steps of one level, a jump's worth of flat after every feature", () => {
+  it("is fair: pits of at most three cells unless an orb hangs over them, steps of one level unless a pad precedes them, a jump's worth of flat after every feature", () => {
     for (const seed of [1, 2, 3, 4, 5]) {
-      const cols = sample(seed, 2000);
+      const cols = sample(seed, 2000, 600);   // past the point where pads and orbs are allowed
       const F = Math.ceil((widget.speed * 0.46 + 8) / 10);   // the generator's own rule, at the starting speed
-      let run = 0, prev: number | null = 0;
+      const orbOver = (i: number) => widget.orbs.some((o) => o.x >= i * 10 - 20 && o.x <= i * 10 + 60);
+      const padBefore = (i: number) => cols.slice(Math.max(0, i - 5), i).some((c) => c.pad);
+      let run = 0, prev: number | null = 0, pads = 0, orbs = 0;
       cols.forEach((col, i) => {
-        if (col.h === null) { run++; expect(run).toBeLessThanOrEqual(3); } else run = 0;
-        if (col.h !== null && prev !== null) expect(col.h - prev).toBeLessThanOrEqual(1);
+        if (col.pad) pads++;
+        if (col.h === null) { run++; if (run > 3 && !orbOver(i - run + 1)) throw new Error(`seed ${seed}: a ${run}-cell pit at ${i} with no orb`); } else run = 0;
+        if (col.h !== null && prev !== null && col.h - prev > 1) {
+          expect(col.h - prev).toBe(4);
+          if (!padBefore(i)) throw new Error(`seed ${seed}: a wall at ${i} with no pad before it`);
+        }
+        if (col.h === null && run === 1 && orbOver(i)) orbs++;
         const feature = col.spike || col.h === null || (prev !== null && col.h !== null && col.h !== prev);
-        if (feature) {
+        if (feature && !(col.h !== null && prev !== null && col.h - prev > 1)) {
           // the end of this feature, then F cells of plain ground at one level
           let j = i + 1;
           while (j < cols.length && (cols[j].spike === col.spike && cols[j].h === col.h) && col.h === null) j++;
@@ -201,7 +211,17 @@ describe("the runner's terrain", () => {
       });
       expect(cols.some((c) => c.h === null)).toBe(true);
       expect(cols.some((c) => c.spike)).toBe(true);
-      expect(new Set(cols.map((c) => c.h).filter((h) => h !== null)).size).toBe(3);
+      expect(pads).toBeGreaterThan(0);
+      expect(orbs).toBeGreaterThan(0);
+      expect(new Set(cols.map((c) => c.h).filter((h) => h !== null)).size).toBeGreaterThanOrEqual(3);
+    }
+  });
+
+  it("holds pads and orbs back until the run is 500 units old", () => {
+    for (const seed of [1, 2, 3]) {
+      const cols = sample(seed, 60, 0);
+      expect(cols.some((c) => c.pad)).toBe(false);
+      expect(widget.orbs.length).toBe(0);
     }
   });
 });

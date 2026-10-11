@@ -712,6 +712,10 @@
     // tap to jump, tap to try again. It only draws while a run is on.
     const DASH_KEY = 'calc:dash';
     const CELL = 10, LEVEL = 10, SPIKE_H = 12, CUBE = 14, PX = 22;
+    // Jump speeds, world units a second, against gravity of 1000: a jump is
+    // 0.46 s and 26 high, an orb's 0.52 s and 34, a pad's 0.6 s and 45.
+    const JUMP_V = 230, ORB_V = 260, PAD_V = 300, ORB_R = 9;
+    const ORB_HIT = 12;   // how far the cube's centre may be from an orb's, either way, and still take it
 
     // mulberry32: a seeded generator, so the terrain is reproducible from its seed.
     const seeded = (seed) => () => {
@@ -797,7 +801,7 @@
       reset(seed) {
         this.seed = seed; this.rng = seeded(seed);
         this.y = 0; this.vy = 0; this.rot = 0; this.score = 0; this.speed = 100; this.dist = 0;
-        this.cols = []; this.col0 = 0; this.level = 0; this.cam = 0;
+        this.cols = []; this.col0 = 0; this.level = 0; this.cam = 0; this.orbs = [];
         this.particles = []; this.newBest = false; this.buffer = -Infinity;
         for (let i = 0; i < 16; i++) this.cols.push({ h: 0, spike: false, feat: false, passed: false });
         // The skyline: two layers of hills, each a sum of three seeded waves.
@@ -815,40 +819,71 @@
       // jump — there is at least a whole jump's worth of flat, measured at
       // the current speed, so a late landing still has room before the
       // next thing. Difficulty is taken out of the spare flats, never that.
+      //
+      // Two pieces break those limits on purpose, and each carries the
+      // thing that makes it possible. A jump pad before a wall four levels
+      // tall: the pad's launch (PAD_V) reaches it, a jump (JUMP_V) cannot.
+      // A jump orb over a pit too wide for one jump: tapped in the air it
+      // gives a second, and the pit is sized so that only the two together
+      // reach the far side. Both wait until the run is a few hundred units
+      // old, so the first pieces teach the plain jump.
       extend() {
-        const r = this.rng, d = Math.min(1, this.dist / 2500);
-        const F = Math.ceil((this.speed * 0.46 + 8) / CELL);   // cells a jump covers, with a little spare
+        const r = this.rng, d = Math.min(1, this.dist / 2500), v = this.speed;
+        const F = Math.ceil((v * 0.46 + 8) / CELL);   // cells a jump covers, with a little spare
         const spare = () => Math.floor(r() * (1 + 4 * (1 - d)));
-        const flat = (n, h = this.level) => { for (let i = 0; i < n; i++) this.cols.push({ h, spike: false, feat: false, passed: false }); };
+        const cell = (h, extra = {}) => ({ h, spike: false, pad: false, feat: false, passed: false, ...extra });
+        const flat = (n, h = this.level) => { for (let i = 0; i < n; i++) this.cols.push(cell(h)); };
+        const unlocked = this.dist > 500;
         const roll = r();
-        if (roll < 0.22 - d * 0.1) { flat(2 + spare()); return; }
-        if (roll < 0.50) {
+        if (roll < 0.20 - d * 0.1) { flat(2 + spare()); return; }
+        if (roll < 0.44) {
           const n = (this.score >= 3 && r() < 0.3 + d * 0.3) ? 2 : 1;
-          for (let i = 0; i < n; i++) this.cols.push({ h: this.level, spike: true, feat: i === 0, passed: false });
+          for (let i = 0; i < n; i++) this.cols.push(cell(this.level, { spike: true, feat: i === 0 }));
           flat(F + spare()); return;
         }
-        if (roll < 0.68) {
+        if (roll < 0.58) {
           const n = 2 + (r() < d ? 1 : 0);
-          for (let i = 0; i < n; i++) this.cols.push({ h: null, spike: false, feat: i === 0, passed: false });
+          for (let i = 0; i < n; i++) this.cols.push(cell(null, { feat: i === 0 }));
           flat(F + spare()); return;
         }
-        if (roll < 0.85 && this.level < 2) {
+        if (roll < 0.70 && this.level < 2) {
           this.level++;
-          this.cols.push({ h: this.level, spike: false, feat: true, passed: false });
+          this.cols.push(cell(this.level, { feat: true }));
+          flat(F + spare()); return;
+        }
+        if (roll < 0.80 && unlocked && this.level <= 1) {
+          // Pad, a gap the launch needs to reach the wall's height, the wall
+          // (F cells, so landing on it leaves a jump's worth), then the drop.
+          const gap = Math.max(1, Math.round(0.22 * v / CELL));
+          this.cols.push(cell(this.level, { pad: true, feat: true }));
+          flat(gap);
+          flat(F, this.level + 4);
+          this.cols.push(cell(this.level));
+          flat(F + spare()); return;
+        }
+        if (roll < 0.90 && unlocked) {
+          // The pit: too wide for one jump, inside two. The orb sits where a
+          // jump from the pit's edge is a quarter second old; the pit is
+          // sized for an orb taken as early as ORB_HIT allows — 0.13 s in,
+          // 21 up, 0.59 s of second arc — so a keen tap still lands.
+          const W = Math.floor((0.723 * v - 10) / CELL);
+          const startX = (this.col0 + this.cols.length) * CELL;
+          this.orbs.push({ x: startX - 10 + 0.25 * v, y: this.level * LEVEL + 24 + CUBE / 2, used: false });
+          for (let i = 0; i < W; i++) this.cols.push(cell(null, { feat: i === 0 }));
           flat(F + spare()); return;
         }
         if (this.level > 0) {
           // The drop is a cell of its own, so the F plain cells after it are
           // the same promise a step up makes — a falling cube cannot jump.
           this.level = r() < 0.5 ? 0 : this.level - 1;
-          this.cols.push({ h: this.level, spike: false, feat: false, passed: false });
+          this.cols.push(cell(this.level));
           flat(F + spare()); return;
         }
         flat(3 + spare());
       }
 
       // ---- The run ---------------------------------------------------------
-      jump() { this.vy = 230; this.rot = 0; this.onGround = false; this.buffer = -Infinity; }
+      jump() { this.vy = JUMP_V; this.rot = 0; this.onGround = false; this.buffer = -Infinity; }
 
       tap() {
         if (this.state === 'running') {
@@ -878,6 +913,7 @@
         this.dist += this.speed * dt;
         while ((this.col0 + this.cols.length) * CELL < this.dist + this.w + CELL * 4) this.extend();
         while (this.cols.length && (this.col0 + 1) * CELL < this.dist - 40) { this.cols.shift(); this.col0++; }
+        this.orbs = this.orbs.filter((o) => o.x > this.dist - 40);
 
         // The ground under the cube is the highest column it stands over.
         const left = this.dist + PX + 2, right = this.dist + PX + CUBE - 2;
@@ -886,22 +922,45 @@
         for (let i = i0; i <= i1; i++) { const c = this.col(i); if (c && c.h !== null) gh = Math.max(gh, c.h * LEVEL); }
 
         // The camera follows the ground the cube stands on, so a jump from
-        // the top level stays in frame; it glides rather than snaps.
-        const standing = gh === -Infinity ? this.cam : Math.min(gh, 2 * LEVEL);
+        // the top level stays in frame; it glides rather than snaps — except
+        // that the cube is never let out of the top of the frame.
+        const standing = gh === -Infinity ? this.cam : gh;
         this.cam += (standing - this.cam) * Math.min(1, dt * 6);
 
+        const prevY = this.y;
         if (!this.onGround || this.y > gh) {
           this.onGround = false;
           this.y += this.vy * dt; this.vy -= G * dt;
           this.rot += (Math.PI / 2) * dt / 0.46;
         }
         if (this.y <= gh) {
-          if (this.y < gh - 4) { this.die(); return; }     // ran into the side of a step
+          // A wall is ground the cube was already below before this frame
+          // moved it; anything else is a landing, however fast it fell.
+          if (prevY < gh - 4) { this.die(); return; }
           this.y = gh; this.vy = 0; this.rot = 0; this.onGround = true;
           if (this.held || performance.now() - this.buffer < 120) this.jump();   // held, or pressed just before landing
         } else if (this.y === gh) {
           this.onGround = true;
         } else if (gh === -Infinity && this.y < -CUBE * 1.5) { this.die(); return; }   // down a pit
+
+        // A pad launches the cube the moment it touches one — on the ground
+        // or skimming over it. An orb gives a second jump in the air, to a
+        // press while the cube is on it, or a finger already held down.
+        for (let i = i0; i <= i1; i++) {
+          const c = this.col(i);
+          if (c && c.pad && !c.used && this.y < c.h * LEVEL + 8) { c.used = true; this.vy = PAD_V; this.rot = 0; this.onGround = false; this.buffer = -Infinity; break; }
+        }
+        if (!this.onGround) {
+          const cx = this.dist + PX + CUBE / 2, cy = this.y + CUBE / 2;
+          const wants = this.held || performance.now() - this.buffer < 120;
+          for (const o of this.orbs) {
+            if (o.used || Math.abs(o.x - cx) > ORB_HIT || Math.abs(o.y - cy) > ORB_HIT) continue;
+            if (wants) { o.used = true; this.vy = ORB_V; this.rot = 0; this.buffer = -Infinity; }
+            break;
+          }
+        }
+        const topGap = (this.h - 6 + this.cam) - CUBE - this.y;   // screen units above the cube
+        if (topGap < 4) this.cam += 4 - topGap;
 
         // Spikes: the hit box is the upper two thirds, so a close shave is a shave.
         for (let i = i0; i <= i1; i++) {
@@ -966,7 +1025,7 @@
         c.fillStyle = '#1a3d3a'; this.skyline(1, 0.5, h - 12 + this.cam * 0.5);
 
         // Terrain: a column per cell, shaded by level, with a bright top edge.
-        const shades = ['#1c3a30', '#245040', '#2d6650'];
+        const shades = ['#1c3a30', '#245040', '#2d6650', '#357a60', '#3d8e70', '#45a280'];
         for (let i = this.col0; i < this.col0 + this.cols.length; i++) {
           const col = this.col(i);
           const sx = i * CELL - this.dist;
@@ -981,6 +1040,20 @@
             c.beginPath(); c.moveTo(sx, top); c.lineTo(sx + CELL / 2, top - SPIKE_H); c.lineTo(sx + CELL, top); c.closePath();
             c.fillStyle = '#dfe8e2'; c.fill(); c.strokeStyle = '#1b2620'; c.lineWidth = 1; c.stroke();
           }
+          if (col.pad) {
+            c.fillStyle = col.used ? '#8a6a2a' : '#e8a33a'; c.fillRect(sx + 1, top - 3, CELL - 2, 3);
+            c.fillStyle = col.used ? '#b08a3a' : '#f7d27a'; c.fillRect(sx + 2, top - 3, CELL - 4, 1);
+          }
+        }
+        // Orbs: a ring with a dot, dimmed once spent.
+        for (const o of this.orbs) {
+          const ox = o.x - this.dist, oy = base - o.y;
+          if (ox < -ORB_R || ox > w + ORB_R) continue;
+          c.globalAlpha = o.used ? 0.3 : 1;
+          c.beginPath(); c.arc(ox, oy, ORB_R - 1.5, 0, Math.PI * 2);
+          c.strokeStyle = '#e8a33a'; c.lineWidth = 2.5; c.stroke();
+          c.beginPath(); c.arc(ox, oy, 2.5, 0, Math.PI * 2); c.fillStyle = '#f7d27a'; c.fill();
+          c.globalAlpha = 1;
         }
 
         // The cube — or, just after a crash, its pieces.
