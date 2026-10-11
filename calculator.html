@@ -29,6 +29,8 @@
     /* The jump button: the cube's colour, and a size a thumb finds without looking. */
     .top button.jump { background: var(--eq); color: #1b2620; width: 52px; font-size: 20px; font-weight: 700; line-height: 36px; }
     .top button.jump:active { background: var(--eq-on); transform: scale(.94); }
+    .top button.auto { width: auto; padding: 0 12px; font-size: 12px; font-weight: 700; letter-spacing: .06em; color: var(--muted); }
+    .top button.auto[aria-pressed="true"] { background: var(--op-on); color: var(--ink); }
     dash-widget { display: block; width: 176px; height: 72px; }
     .top a, .top button {
       width: 36px; height: 36px; border-radius: 18px; border: 0; padding: 0; cursor: pointer; touch-action: manipulation;
@@ -48,6 +50,7 @@
       <dash-widget></dash-widget>
     </div>
     <div class="right">
+      <button id="autoBtn" class="auto" aria-pressed="false" aria-label="Autopilot" title="Let the cube play itself">AUTO</button>
       <button id="jumpBtn" class="jump" aria-label="Jump" title="Jump (space)">▲</button>
       <button id="tapeBtn" aria-label="Show history" title="History">≡</button>
     </div>
@@ -742,7 +745,7 @@
         this.attempt = 0;
         this.state = 'idle';
         this.reset(1);
-        this.held = false; this.buffer = -Infinity; this.particles = [];
+        this.held = false; this.buffer = -Infinity; this.particles = []; this.auto = false;
         this.canvas.addEventListener('pointerdown', (e) => { e.preventDefault(); this.press(); });
         this.onKey = (e) => {
           if (e.key !== ' ' || e.ctrlKey || e.metaKey || e.altKey) return;
@@ -780,6 +783,48 @@
       press() { this.held = true; this.tap(); }
       release() { this.held = false; }
       pause() { if (this.state === 'running') { this.state = 'paused'; this.draw(); } }
+
+      // Autopilot: the cube plays itself, and tries again after a crash.
+      // Its runs do not count towards the best, which stays the player's.
+      setAuto(on) {
+        this.auto = on;
+        if (on && this.state !== 'running') this.tap();
+        this.draw();
+      }
+
+      // What a perfect player does: take off for the next thing within the
+      // window a jump allows for it, leave a tall wall to its pad, and tap
+      // an orb when on it. The same pilot proves the terrain fair in the
+      // tests, over 60 seeds of 40 s each.
+      autopilot() {
+        if (this.state !== 'running') return;
+        const air = this.speed * 0.46;
+        const lead = this.dist + PX + CUBE - 2;
+        const here = Math.floor((this.dist + PX + CUBE / 2) / CELL);
+        const hereCol = this.col(here);
+        const level = hereCol && hereCol.h !== null ? hereCol.h : 0;
+        let jump = false;
+        for (let i = here; i <= here + 8; i++) {
+          const c = this.col(i);
+          if (!c) continue;
+          const ahead = i * CELL - lead;
+          if (ahead < 0) continue;
+          let width = 0, need = false;
+          if (c.spike) { need = true; width = CELL; const n = this.col(i + 1); if (n && n.spike) width = 2 * CELL; }
+          else if (c.h === null) { need = true; width = 0; for (let j = i; this.col(j) && this.col(j).h === null; j++) width += CELL; width -= CELL; }
+          else if (c.h > level + 1) break;                     // a wall for a pad: leave it to the pad
+          else if (c.h > level) { need = true; width = 0; }
+          if (!need) continue;
+          const latest = Math.max(4, air - width - 16);
+          if (ahead >= 2 && ahead <= latest) jump = true;
+          break;
+        }
+        if (jump && this.onGround) this.tap();
+        if (!this.onGround) {
+          const cx = this.dist + PX + CUBE / 2, cy = this.y + CUBE / 2;
+          for (const o of this.orbs) if (!o.used && Math.abs(o.x - cx) < ORB_HIT && Math.abs(o.y - cy) < ORB_HIT) { this.tap(); break; }
+        }
+      }
 
       // The world is always 52 units tall, whatever size the widget is
       // drawn at, so a bigger widget shows a bigger cube, not more ground.
@@ -903,6 +948,7 @@
         if (this.state !== 'running') return;
         const dt = Math.min(0.05, (now - this.last) / 1000);
         this.last = now;
+        if (this.auto) this.autopilot();
         this.step(dt);
         this.draw();
         if (this.state === 'running') requestAnimationFrame(this.loop);
@@ -978,9 +1024,10 @@
 
       die() {
         this.state = 'dead';
-        this.newBest = this.score > this.best && this.score > 0;
+        this.newBest = !this.auto && this.score > this.best && this.score > 0;
         if (this.newBest) { this.best = this.score; store(DASH_KEY, this.best); }
         if (navigator.vibrate) navigator.vibrate(20);
+        if (this.auto) setTimeout(() => { if (this.auto && this.state === 'dead') this.tap(); }, 900);
         // The cube goes to pieces: a dozen bits of it, flying, for half a second.
         const cx = PX + CUBE / 2, cy = this.y + CUBE / 2;
         this.particles = Array.from({ length: 12 }, (_, k) => {
@@ -1085,7 +1132,7 @@
           c.fillText(this.newBest ? `★ new best ${this.score}` : `✕ ${this.score} · best ${this.best}`, w - 5, 5);
         }
         else if (this.state === 'paused') { c.fillText(`paused · ${this.score}`, w - 5, 5); }
-        else { c.fillStyle = '#f3f7f4'; c.fillText(String(this.score), w - 5, 5); c.textAlign = 'left'; c.fillStyle = '#9fb0a6'; c.fillText(`#${this.attempt}`, 5, 5); }
+        else { c.fillStyle = '#f3f7f4'; c.fillText(String(this.score), w - 5, 5); c.textAlign = 'left'; c.fillStyle = '#9fb0a6'; c.fillText(`#${this.attempt}${this.auto ? ' auto' : ''}`, 5, 5); }
       }
     }
     customElements.define('dash-widget', DashWidget);
@@ -1093,6 +1140,11 @@
     document.getElementById('jumpBtn').addEventListener('pointerdown', (e) => {
       e.preventDefault();
       document.querySelector('dash-widget').press();
+    });
+    document.getElementById('autoBtn').addEventListener('click', (e) => {
+      const on = e.currentTarget.getAttribute('aria-pressed') !== 'true';
+      e.currentTarget.setAttribute('aria-pressed', String(on));
+      document.querySelector('dash-widget').setAuto(on);
     });
     document.getElementById('tapeBtn').addEventListener('click', () => {
       document.querySelector('slow-calc').press('toggleTape');

@@ -51,8 +51,9 @@ calculator.html   a scientific calculator, the same shape: one file, a
                   jump orbs over pits too wide for one jump — with a whole
                   jump's worth of flat after every feature so it is always
                   fair (a perfect pilot survives 60 seeds × 40 s): tap the widget, the ▲ button top-right or
-                  space to start and to jump, hold to keep jumping, best
-                  under `calc:dash`; it draws only while a run is on and
+                  space to start and to jump, hold to keep jumping, AUTO to
+                  let the pilot play (its runs are not a best), best under
+                  `calc:dash`; it draws only while a run is on and
                   pauses under the history panel. Writing two things
                   together (2π) binds tighter than ÷, as on a Casio. A caret
                   (tap a token, or ← →) edits anywhere in the expression;
