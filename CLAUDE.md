@@ -56,7 +56,12 @@ calculator.html   a scientific calculator, the same shape: one file, a
                   space to start and to jump, hold to keep jumping, AUTO to
                   let the pilot play (its runs are not a best), best under
                   `calc:dash`; it draws only while a run is on and
-                  pauses under the history panel. Writing two things
+                  pauses under the history panel. Below it, on phones 700px
+                  or taller, a Subway-Surfers-style runner (`<surf-widget>`):
+                  three lanes seen from behind, swipe to change lane, up to
+                  jump a low barrier, down to roll under a high one, trains
+                  to dodge, coins to collect; arrows steer it during a run
+                  and are the caret's otherwise; best under `calc:surf`. Writing two things
                   together (2π) binds tighter than ÷, as on a Casio. A caret
                   (tap a token, or ← →) edits anywhere in the expression;
                   tapping the result copies it. `scripts/calculator.test.ts`

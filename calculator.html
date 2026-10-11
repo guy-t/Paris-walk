@@ -31,6 +31,11 @@
        that yields: the calculator keeps the room its keys and display need,
        and the band shrinks towards a playable floor on a short phone. */
     dash-widget { display: block; margin: 6px 8px 0; flex: 0 1 clamp(84px, 16vh, 150px); min-height: 56px; }
+    /* The second runner, below the first: three lanes seen from behind. It
+       yields the same way, and on a phone shorter than 700px there is no room
+       for a second band without squeezing the calculator, so it steps aside. */
+    surf-widget { display: block; margin: 6px 8px 0; flex: 0 1 clamp(72px, 13vh, 120px); min-height: 56px; }
+    @media (max-height: 699px) { surf-widget { display: none; } }
     /* The jump button: the cube's colour, and a size a thumb finds without looking. */
     .top button.jump { background: var(--eq); color: #1b2620; width: 52px; font-size: 20px; font-weight: 700; line-height: 36px; }
     .top button.jump:active { background: var(--eq-on); transform: scale(.94); }
@@ -59,6 +64,7 @@
     </div>
   </div>
   <dash-widget></dash-widget>
+  <surf-widget></surf-widget>
   <slow-calc></slow-calc>
 
   <script>
@@ -490,6 +496,11 @@
             button.eq { background: var(--eq); color: #1b2620; font-weight: 600; }
             button.eq:active { background: var(--eq-on); }
             button.sci { background: var(--sci); font-size: 17px; height: clamp(32px, 5.2vh, 42px); border-radius: 10px; color: #dfe8e2; }
+            /* With two runners above, a mid-height phone needs the keys a touch shorter so both bands have room. */
+            @media (min-height: 700px) and (max-height: 819px) {
+              button { height: clamp(42px, 6vh, 60px); }
+              button.sci { height: clamp(32px, 4.6vh, 42px); }
+            }
             button.sci:active { background: var(--key-on); }
             button.sci.on { background: var(--op-on); color: var(--ink); }
             :host(.second) button.sci[data-second] { color: var(--eq); }
@@ -706,7 +717,7 @@
       }
 
       showTape(open) {
-        if (open) { this.renderTape(); document.querySelector('dash-widget')?.pause(); }
+        if (open) { this.renderTape(); for (const w of document.querySelectorAll('dash-widget, surf-widget')) w.pause(); }
         this.$('.tape').classList.toggle('open', open);
       }
     }
@@ -1142,6 +1153,226 @@
       }
     }
     customElements.define('dash-widget', DashWidget);
+
+    // ---- The second runner: three lanes, seen from behind -------------------
+    // Subway-Surfers fashion: swipe left or right to change lane, up to jump
+    // a low barrier, down to roll under a high one; trains fill a lane and
+    // have to be dodged; coins are there to be collected. Everything comes
+    // towards the camera along z, 1 at the horizon and 0 at the runner.
+    const SURF_KEY = 'calc:surf';
+    const LANES = 3, TRAIN_LEN = 0.4, ROW_GAP = 0.6, JUMP_T = 0.55, ROLL_T = 0.45;
+
+    class SurfWidget extends HTMLElement {
+      constructor() {
+        super();
+        const root = this.attachShadow({ mode: 'open' });
+        root.innerHTML = `
+          <style>
+            :host { display: block; border-radius: 10px; overflow: hidden; background: #0e1a20; cursor: pointer;
+              -webkit-tap-highlight-color: transparent; touch-action: none; }
+            canvas { display: block; width: 100%; height: 100%; }
+          </style>
+          <canvas role="button" aria-label="Swipe to steer, up to jump, down to roll" tabindex="0"></canvas>`;
+        this.canvas = root.querySelector('canvas');
+        this.ctx = this.canvas.getContext('2d');
+        this.best = +stored(SURF_KEY, 0) || 0;
+        this.state = 'idle';
+        this.reset(1);
+        this.canvas.addEventListener('pointerdown', (e) => { e.preventDefault(); this.from = { x: e.clientX, y: e.clientY }; });
+        this.onUp = (e) => {
+          if (!this.from) return;
+          const dx = e.clientX - this.from.x, dy = e.clientY - this.from.y;
+          this.from = null;
+          if (this.state !== 'running') { this.start(); return; }
+          if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 18) this.steer(dx > 0 ? 1 : -1);
+          else if (dy < -18) this.doJump();
+          else if (dy > 18) this.doRoll();
+          else this.doJump();                                   // a plain tap is a jump
+        };
+        // Arrows steer while a run is on, and the calculator's caret does not
+        // see them; the rest of the time they are the caret's.
+        this.onKey = (e) => {
+          if (this.state !== 'running' || e.ctrlKey || e.metaKey || e.altKey) return;
+          const act = { ArrowLeft: () => this.steer(-1), ArrowRight: () => this.steer(1), ArrowUp: () => this.doJump(), ArrowDown: () => this.doRoll() }[e.key];
+          if (!act) return;
+          e.preventDefault(); e.stopImmediatePropagation();
+          act();
+        };
+        this.onHide = () => { if (document.hidden) this.pause(); };
+        this.loop = this.loop.bind(this);
+      }
+
+      connectedCallback() {
+        window.addEventListener('pointerup', this.onUp);
+        window.addEventListener('keydown', this.onKey, true);
+        document.addEventListener('visibilitychange', this.onHide);
+        if (typeof ResizeObserver !== 'undefined') { this.ro = new ResizeObserver(() => this.fit()); this.ro.observe(this); }
+        this.fit();
+      }
+      disconnectedCallback() {
+        window.removeEventListener('pointerup', this.onUp);
+        window.removeEventListener('keydown', this.onKey, true);
+        document.removeEventListener('visibilitychange', this.onHide);
+        if (this.ro) this.ro.disconnect();
+      }
+
+      fit() {
+        if (!this.ctx) return;
+        const dpr = window.devicePixelRatio || 1;
+        const r = this.getBoundingClientRect();
+        this.w = Math.max(1, r.width); this.h = Math.max(1, r.height);
+        this.canvas.width = Math.round(this.w * dpr); this.canvas.height = Math.round(this.h * dpr);
+        this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        this.draw();
+      }
+
+      reset(seed) {
+        this.rng = seeded(seed);
+        this.lane = 1; this.x = 1; this.jump = 0; this.roll = 0;
+        this.speed = 0.9; this.dist = 0; this.coins = 0; this.items = []; this.nextAt = 0.5; this.spawned = 0;
+        this.newBest = false;
+      }
+
+      start() {
+        this.reset((Math.random() * 0x7fffffff) | 0);
+        this.state = 'running'; this.last = performance.now();
+        requestAnimationFrame(this.loop);
+      }
+      pause() { if (this.state === 'running') { this.state = 'paused'; this.draw(); } }
+      steer(d) { if (this.state === 'running') this.lane = Math.max(0, Math.min(LANES - 1, this.lane + d)); }
+      doJump() { if (this.state === 'running' && this.jump <= 0 && this.roll <= 0) this.jump = JUMP_T; }
+      doRoll() { if (this.state === 'running' && this.jump <= 0 && this.roll <= 0) this.roll = ROLL_T; }
+
+      loop(now) {
+        if (this.state !== 'running') return;
+        const dt = Math.min(0.05, (now - this.last) / 1000);
+        this.last = now;
+        this.step(dt);
+        this.draw();
+        if (this.state === 'running') requestAnimationFrame(this.loop);
+      }
+
+      // A row of things at the horizon, never blocking every lane, with a
+      // free lane always reachable: rows are ROW_GAP apart in z, which at the
+      // top speed is still twice a lane change.
+      spawn() {
+        const r = this.rng, lanes = [0, 1, 2].sort(() => r() - 0.5);
+        const far = this.dist > 300, roll = r();
+        const put = (lane, kind, z = 1) => this.items.push({ lane, kind, z, done: false });
+        const coinsIn = (lane) => { for (let k = 0; k < 3; k++) put(lane, 'coin', 1 + k * 0.08); };
+        if (roll < 0.35) { put(lanes[0], r() < 0.5 ? 'low' : 'high'); coinsIn(lanes[1]); }
+        else if (roll < 0.6) { put(lanes[0], 'train'); coinsIn(lanes[1]); }
+        else if (roll < 0.8) { put(lanes[0], 'low'); put(lanes[1], 'high'); coinsIn(lanes[2]); }
+        else if (far && roll < 0.92) { put(lanes[0], 'train'); put(lanes[1], 'train'); coinsIn(lanes[2]); }
+        else { coinsIn(lanes[0]); coinsIn(lanes[1]); }
+        this.spawned++;
+      }
+
+      step(dt) {
+        this.dist += this.speed * dt * 14;                         // metres, for the score
+        this.speed = Math.min(1.6, this.speed + dt * 0.012);
+        this.x += (this.lane - this.x) * Math.min(1, dt * 12);     // the lane change glides
+        if (this.jump > 0) this.jump -= dt;
+        if (this.roll > 0) this.roll -= dt;
+        for (const it of this.items) it.z -= this.speed * dt;
+        this.nextAt -= this.speed * dt;
+        if (this.nextAt <= 0) { this.spawn(); this.nextAt = ROW_GAP + this.rng() * 0.4; }
+
+        const airborne = this.jump > JUMP_T * 0.15 && this.jump < JUMP_T * 0.9;
+        for (const it of this.items) {
+          if (it.done || Math.abs(this.x - it.lane) > 0.5) continue;
+          const len = it.kind === 'train' ? TRAIN_LEN : 0.04;
+          if (it.z > 0.03 || it.z + len < -0.03) continue;        // not at the runner yet, or already past
+          if (it.kind === 'coin') { it.done = true; this.coins++; continue; }
+          if (it.kind === 'low' && airborne) continue;
+          if (it.kind === 'high' && this.roll > 0) continue;
+          this.die(); return;
+        }
+        this.items = this.items.filter((it) => it.z + (it.kind === 'train' ? TRAIN_LEN : 0) > -0.2);
+      }
+
+      die() {
+        this.state = 'dead';
+        const score = Math.floor(this.dist);
+        this.newBest = score > this.best;
+        if (this.newBest) { this.best = score; store(SURF_KEY, score); }
+        if (navigator.vibrate) navigator.vibrate(20);
+      }
+
+      // Perspective: y and scale from z, so the far end is small and high.
+      proj(z) {
+        const h = this.h, horizon = h * 0.34;
+        const f = Math.pow(Math.max(0, 1 - z), 1.7);
+        return { y: horizon + (h - horizon) * f, s: 0.12 + 0.88 * f };
+      }
+      laneX(lane, s) { return this.w / 2 + (lane - 1) * this.w * 0.3 * s; }
+
+      draw() {
+        if (!this.ctx) return;
+        const c = this.ctx, w = this.w, h = this.h;
+        c.clearRect(0, 0, w, h);
+        const sky = c.createLinearGradient(0, 0, 0, h);
+        sky.addColorStop(0, '#182a34'); sky.addColorStop(0.34, '#2a4a52'); sky.addColorStop(0.35, '#1c3a30'); sky.addColorStop(1, '#245040');
+        c.fillStyle = sky; c.fillRect(0, 0, w, h);
+        // The track: three lanes converging on the horizon.
+        const near = this.proj(0), farP = this.proj(1);
+        c.fillStyle = '#17323a';
+        c.beginPath();
+        c.moveTo(this.laneX(-0.5, near.s), near.y); c.lineTo(this.laneX(2.5, near.s), near.y);
+        c.lineTo(this.laneX(2.5, farP.s), farP.y); c.lineTo(this.laneX(-0.5, farP.s), farP.y); c.closePath(); c.fill();
+        c.strokeStyle = 'rgba(159, 217, 196, .45)'; c.lineWidth = 1;
+        for (const l of [-0.5, 0.5, 1.5, 2.5]) { c.beginPath(); c.moveTo(this.laneX(l, near.s), near.y); c.lineTo(this.laneX(l, farP.s), farP.y); c.stroke(); }
+        // Sleepers scroll towards the camera.
+        for (let k = 0; k < 10; k++) {
+          const z = ((k / 10) + (this.dist * 0.02) % 0.1) % 1;
+          const p = this.proj(z);
+          c.fillStyle = `rgba(159, 217, 196, ${0.08 + 0.15 * (1 - z)})`;
+          c.fillRect(this.laneX(-0.5, p.s), p.y, this.laneX(2.5, p.s) - this.laneX(-0.5, p.s), Math.max(1, 2 * p.s));
+        }
+        // Things on the track, far to near.
+        const sorted = [...this.items].sort((a, b) => b.z - a.z);
+        for (const it of sorted) {
+          if (it.done) continue;
+          const p = this.proj(Math.max(0, it.z));
+          const x = this.laneX(it.lane, p.s), lw = w * 0.22 * p.s, u = h * 0.3 * p.s;
+          if (it.kind === 'coin') { c.fillStyle = '#e8a33a'; c.beginPath(); c.ellipse(x, p.y - u * 0.35, u * 0.14, u * 0.18, 0, 0, Math.PI * 2); c.fill(); c.fillStyle = '#f7d27a'; c.fillRect(x - 1, p.y - u * 0.45, 2, u * 0.2); }
+          else if (it.kind === 'low') { c.fillStyle = '#e2533b'; c.fillRect(x - lw / 2, p.y - u * 0.4, lw, u * 0.4); c.fillStyle = '#f3f7f4'; c.fillRect(x - lw / 2, p.y - u * 0.4, lw, Math.max(1, u * 0.08)); }
+          else if (it.kind === 'high') {
+            c.fillStyle = '#9fb0a6'; c.fillRect(x - lw / 2, p.y - u * 1.3, Math.max(1, lw * 0.08), u * 1.3); c.fillRect(x + lw / 2 - Math.max(1, lw * 0.08), p.y - u * 1.3, Math.max(1, lw * 0.08), u * 1.3);
+            c.fillStyle = '#e8a33a'; c.fillRect(x - lw / 2, p.y - u * 1.3, lw, u * 0.5);
+          } else {
+            // A train: its near face at z, its roof running back to z + TRAIN_LEN.
+            const q = this.proj(Math.min(1, Math.max(0, it.z + TRAIN_LEN)));
+            const xb = this.laneX(it.lane, q.s), lwb = w * 0.22 * q.s, ub = h * 0.3 * q.s;
+            c.fillStyle = '#2d6650';
+            c.beginPath(); c.moveTo(x - lw / 2, p.y - u * 1.2); c.lineTo(xb - lwb / 2, q.y - ub * 1.2); c.lineTo(xb + lwb / 2, q.y - ub * 1.2); c.lineTo(x + lw / 2, p.y - u * 1.2); c.closePath(); c.fill();
+            c.fillStyle = '#3d8e70'; c.fillRect(x - lw / 2, p.y - u * 1.2, lw, u * 1.2);
+            c.fillStyle = '#9fd9c4'; c.fillRect(x - lw / 2 + lw * 0.15, p.y - u * 1.05, lw * 0.3, u * 0.35); c.fillRect(x + lw / 2 - lw * 0.45, p.y - u * 1.05, lw * 0.3, u * 0.35);
+            c.fillStyle = '#e8a33a'; c.fillRect(x - lw / 2 + lw * 0.1, p.y - u * 0.5, lw * 0.2, u * 0.15); c.fillRect(x + lw / 2 - lw * 0.3, p.y - u * 0.5, lw * 0.2, u * 0.15);
+          }
+        }
+        // The runner: a hooded figure, mid-jump or rolled up.
+        const pr = this.proj(0), px = this.laneX(this.x, pr.s), ph = h * 0.3;
+        const lift = this.jump > 0 ? Math.sin(Math.PI * (1 - this.jump / JUMP_T)) * h * 0.22 : 0;
+        const squash = this.roll > 0 ? 0.55 : 1;
+        const bodyH = ph * 0.6 * squash, bodyW = w * 0.07;
+        const baseY = pr.y - lift;
+        c.fillStyle = this.state === 'dead' ? '#e2533b' : '#e8a33a';
+        c.fillRect(px - bodyW / 2, baseY - bodyH, bodyW, bodyH);
+        c.fillStyle = '#f3d6b0'; c.beginPath(); c.arc(px, baseY - bodyH - ph * 0.12 * squash, ph * 0.12, 0, Math.PI * 2); c.fill();
+        c.fillStyle = '#1b2620'; c.fillRect(px - bodyW / 2, baseY - bodyH * 0.25, bodyW * 0.4, bodyH * 0.25); c.fillRect(px + bodyW * 0.1, baseY - bodyH * 0.25, bodyW * 0.4, bodyH * 0.25);
+        // Words
+        const fs = Math.max(10, Math.min(14, h / 7));
+        c.font = `600 ${fs}px -apple-system, Segoe UI, Roboto, sans-serif`;
+        c.textBaseline = 'top'; c.textAlign = 'left';
+        c.fillStyle = '#f3f7f4';
+        if (this.state === 'idle') { c.fillStyle = '#9fb0a6'; c.fillText(this.best ? `best ${this.best} m` : 'swipe to steer', 6, 5); c.textAlign = 'right'; c.fillText('tap ▶', w - 6, 5); }
+        else if (this.state === 'dead') { c.fillStyle = this.newBest ? '#e8a33a' : '#e2533b'; c.fillText(this.newBest ? `★ new best ${Math.floor(this.dist)} m` : `✕ ${Math.floor(this.dist)} m · best ${this.best} m`, 6, 5); c.textAlign = 'right'; c.fillStyle = '#9fb0a6'; c.fillText('tap ▶', w - 6, 5); }
+        else if (this.state === 'paused') { c.fillStyle = '#9fb0a6'; c.fillText(`paused · ${Math.floor(this.dist)} m`, 6, 5); }
+        else { c.fillText(`${Math.floor(this.dist)} m`, 6, 5); c.textAlign = 'right'; c.fillStyle = '#e8a33a'; c.fillText(`● ${this.coins}`, w - 6, 5); }
+      }
+    }
+    customElements.define('surf-widget', SurfWidget);
     // pointerdown, not click: a jump has to happen on the press, not the release.
     document.getElementById('jumpBtn').addEventListener('pointerdown', (e) => {
       e.preventDefault();
