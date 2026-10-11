@@ -61,7 +61,10 @@ calculator.html   a scientific calculator, the same shape: one file, a
                   three lanes seen from behind, swipe to change lane, up to
                   jump a low barrier, down to roll under a high one, trains
                   to dodge, coins to collect; arrows steer it during a run
-                  and are the caret's otherwise; best under `calc:surf`. Writing two things
+                  and are the caret's otherwise; best under `calc:surf`.
+                  Both are drawn with some care — a night city and a moon
+                  behind the cube, buildings streaming past the lanes — and
+                  every draw() guards a missing canvas, so jsdom can run them. Writing two things
                   together (2π) binds tighter than ÷, as on a Casio. A caret
                   (tap a token, or ← →) edits anywhere in the expression;
                   tapping the result copies it. `scripts/calculator.test.ts`

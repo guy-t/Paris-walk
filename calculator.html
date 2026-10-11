@@ -464,7 +464,8 @@
             }
             .expr.done .caret { display: none; }
             @keyframes blink { to { visibility: hidden; } }
-            .out { cursor: pointer; }
+            .out { cursor: pointer; text-shadow: 0 0 18px rgba(232, 163, 58, .12); }
+            .out.result { text-shadow: 0 0 22px rgba(243, 247, 244, .18); }
             .mode .copied { color: var(--eq); }
             .out {
               font-size: 44px; font-weight: 300; line-height: 1.15; letter-spacing: -1px; min-height: 51px;
@@ -486,7 +487,10 @@
               font: inherit; font-size: 24px; border: 0; border-radius: 14px; color: var(--ink);
               background: var(--key); height: clamp(42px, 7vh, 60px); cursor: pointer; padding: 0;
               transition: transform .06s; touch-action: manipulation;
+              background-image: linear-gradient(180deg, rgba(255, 255, 255, .07), rgba(0, 0, 0, .10));
+              box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08), 0 2px 4px rgba(0, 0, 0, .28);
             }
+            button:active { box-shadow: inset 0 2px 4px rgba(0, 0, 0, .35); }
             button:active { transform: scale(.96); }
             button.num:active { background: var(--key-on); }
             button.wide { grid-column: span 2; }
@@ -865,6 +869,10 @@
         this.y = 0; this.vy = 0; this.rot = 0; this.score = 0; this.speed = 100; this.dist = 0;
         this.cols = []; this.col0 = 0; this.level = 0; this.cam = 0; this.orbs = [];
         this.particles = []; this.newBest = false; this.buffer = -Infinity;
+        this.trail = []; this.dust = []; this.t = 0;
+        // A night sky and a city, from the same seed as the ground.
+        this.stars = Array.from({ length: 28 }, () => ({ x: this.rng() * 400, y: 2 + this.rng() * 26, r: 0.4 + this.rng() * 0.8, tw: this.rng() * 6 }));
+        this.city = Array.from({ length: 22 }, () => ({ x: this.rng() * 420, w: 8 + this.rng() * 16, h: 6 + this.rng() * 18, lit: this.rng() }));
         for (let i = 0; i < 16; i++) this.cols.push({ h: 0, spike: false, feat: false, passed: false });
         // The skyline: two layers of hills, each a sum of three seeded waves.
         this.hills = [0, 1].map(() => [0, 1, 2].map((k) => ({
@@ -974,6 +982,15 @@
       step(dt) {
         const G = 1000;   // with a 230 px/s jump: 0.46 s in the air, 26 px high, 40 px of ground
         this.dist += this.speed * dt;
+        this.t += dt;
+        // A trail of fading squares behind the cube, and dust where it lands.
+        const wasOnGround = this.onGround;
+        if (!this.onGround) this.trail.push({ x: this.dist + PX + CUBE / 2, y: this.y + CUBE / 2, life: 0.22 });   // only in the air, so it reads as a leap
+        for (const p of this.trail) p.life -= dt;
+        this.trail = this.trail.filter((p) => p.life > 0);
+        for (const p of this.dust) { p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt; }
+        this.dust = this.dust.filter((p) => p.life > 0);
+        this.landedThisFrame = false;
         while ((this.col0 + this.cols.length) * CELL < this.dist + this.w + CELL * 4) this.extend();
         while (this.cols.length && (this.col0 + 1) * CELL < this.dist - 40) { this.cols.shift(); this.col0++; }
         this.orbs = this.orbs.filter((o) => o.x > this.dist - 40);
@@ -1000,6 +1017,7 @@
           // A wall is ground the cube was already below before this frame
           // moved it; anything else is a landing, however fast it fell.
           if (prevY < gh - 4) { this.die(); return; }
+          if (!wasOnGround) for (let k = 0; k < 5; k++) this.dust.push({ x: this.dist + PX + CUBE / 2 + (k - 2) * 2, y: gh + 1, vx: (k - 2) * 25 - this.speed * 0.3, vy: 20 + Math.random() * 25, life: 0.3 });
           this.y = gh; this.vy = 0; this.rot = 0; this.onGround = true;
           if (this.held || performance.now() - this.buffer < 120) this.jump();   // held, or pressed just before landing
         } else if (this.y === gh) {
@@ -1082,43 +1100,93 @@
         if (!this.ctx) return;
         const c = this.ctx, w = this.w, h = this.h, base = h - 6 + this.cam;
         c.clearRect(0, 0, w, h);
+        // Night sky, stars that twinkle, a moon with a halo.
         const bg = c.createLinearGradient(0, 0, 0, h);
-        bg.addColorStop(0, '#182a34'); bg.addColorStop(1, '#0e1a20');
+        bg.addColorStop(0, '#0f1c26'); bg.addColorStop(0.6, '#182a34'); bg.addColorStop(1, '#0e1a20');
         c.fillStyle = bg; c.fillRect(0, 0, w, h);
+        for (const st of this.stars) {
+          const x = ((st.x - this.dist * 0.08) % 400 + 400) % 400;
+          if (x > w) continue;
+          c.globalAlpha = 0.45 + 0.45 * Math.sin(this.t * 2 + st.tw);
+          c.fillStyle = '#dfe8e2'; c.fillRect(x, st.y + this.cam * 0.1, st.r, st.r);
+        }
+        c.globalAlpha = 1;
+        const mx = w - 26, my = 12 + this.cam * 0.1;
+        const halo = c.createRadialGradient(mx, my, 2, mx, my, 16);
+        halo.addColorStop(0, 'rgba(247, 210, 122, .35)'); halo.addColorStop(1, 'rgba(247, 210, 122, 0)');
+        c.fillStyle = halo; c.fillRect(mx - 16, my - 16, 32, 32);
+        c.fillStyle = '#f3e7c0'; c.beginPath(); c.arc(mx, my, 4.5, 0, Math.PI * 2); c.fill();
+        c.fillStyle = '#e4d3a4'; c.beginPath(); c.arc(mx - 1.5, my - 1, 1.2, 0, Math.PI * 2); c.fill();
+        // A city on the horizon, then the hills in front of it.
+        const cityBase = h - 22 + this.cam * 0.25;
+        for (const b of this.city) {
+          const x = ((b.x - this.dist * 0.15) % 420 + 420) % 420 - 10;
+          if (x > w) continue;
+          c.fillStyle = '#132730'; c.fillRect(x, cityBase - b.h, b.w, b.h + 30);
+          if (b.lit > 0.4) {
+            c.fillStyle = 'rgba(247, 210, 122, .55)';
+            for (let yy = cityBase - b.h + 2; yy < cityBase - 2; yy += 3) for (let xx = x + 2; xx < x + b.w - 2; xx += 3) if (((xx * 7 + yy * 13 + b.w) | 0) % 5 < 2) c.fillRect(xx, yy, 1, 1);
+          }
+        }
         c.fillStyle = '#17323a'; this.skyline(0, 0.25, h - 20 + this.cam * 0.3);
         c.fillStyle = '#1a3d3a'; this.skyline(1, 0.5, h - 12 + this.cam * 0.5);
 
-        // Terrain: a column per cell, shaded by level, with a bright top edge.
+        // Terrain: bevelled blocks, a grid line per cell, a bright top edge.
         const shades = ['#1c3a30', '#245040', '#2d6650', '#357a60', '#3d8e70', '#45a280'];
+        const darker = ['#152c24', '#1b3c30', '#214c3c', '#285b48', '#2e6a54', '#357a60'];
         for (let i = this.col0; i < this.col0 + this.cols.length; i++) {
           const col = this.col(i);
           const sx = i * CELL - this.dist;
-          if (sx > w || sx + CELL < 0) continue;
-          if (col.h === null) continue;
+          if (sx > w || sx + CELL < 0 || col.h === null) continue;
           const top = base - col.h * LEVEL;
           c.fillStyle = shades[col.h]; c.fillRect(sx, top, CELL + 0.5, h - top);
+          c.fillStyle = darker[col.h]; c.fillRect(sx + CELL - 1, top + 1, 1, h - top);
+          c.fillStyle = 'rgba(0, 0, 0, .12)'; c.fillRect(sx, top + 4, CELL + 0.5, 1);
           c.fillStyle = '#9fd9c4'; c.fillRect(sx, top, CELL + 0.5, 1);
           const prev = this.col(i - 1);
-          if (prev && prev.h !== null && prev.h < col.h) { c.fillRect(sx, top, 1, (col.h - prev.h) * LEVEL); }
+          if (prev && prev.h !== null && prev.h < col.h) c.fillRect(sx, top, 1, (col.h - prev.h) * LEVEL);
           if (col.spike) {
+            const g = c.createLinearGradient(0, top - SPIKE_H, 0, top);
+            g.addColorStop(0, '#ffffff'); g.addColorStop(1, '#9fb0a6');
             c.beginPath(); c.moveTo(sx, top); c.lineTo(sx + CELL / 2, top - SPIKE_H); c.lineTo(sx + CELL, top); c.closePath();
-            c.fillStyle = '#dfe8e2'; c.fill(); c.strokeStyle = '#1b2620'; c.lineWidth = 1; c.stroke();
+            c.fillStyle = g; c.fill(); c.strokeStyle = '#1b2620'; c.lineWidth = 1; c.stroke();
           }
           if (col.pad) {
+            if (!col.used) { c.shadowColor = '#e8a33a'; c.shadowBlur = 6; }
             c.fillStyle = col.used ? '#8a6a2a' : '#e8a33a'; c.fillRect(sx + 1, top - 3, CELL - 2, 3);
-            c.fillStyle = col.used ? '#b08a3a' : '#f7d27a'; c.fillRect(sx + 2, top - 3, CELL - 4, 1);
+            c.shadowBlur = 0;
+            c.fillStyle = col.used ? '#b08a3a' : '#fff1c2'; c.fillRect(sx + 2, top - 3, CELL - 4, 1);
           }
         }
-        // Orbs: a ring with a dot, dimmed once spent.
+        // Orbs: a ring that breathes, with a soft glow, dimmed once spent.
         for (const o of this.orbs) {
           const ox = o.x - this.dist, oy = base - o.y;
-          if (ox < -ORB_R || ox > w + ORB_R) continue;
+          if (ox < -ORB_R - 4 || ox > w + ORB_R + 4) continue;
+          const pulse = o.used ? 0 : Math.sin(this.t * 6) * 0.8;
           c.globalAlpha = o.used ? 0.3 : 1;
-          c.beginPath(); c.arc(ox, oy, ORB_R - 1.5, 0, Math.PI * 2);
+          if (!o.used) {
+            const g = c.createRadialGradient(ox, oy, ORB_R - 2, ox, oy, ORB_R + 5);
+            g.addColorStop(0, 'rgba(232, 163, 58, .35)'); g.addColorStop(1, 'rgba(232, 163, 58, 0)');
+            c.fillStyle = g; c.fillRect(ox - ORB_R - 5, oy - ORB_R - 5, 2 * ORB_R + 10, 2 * ORB_R + 10);
+          }
+          c.beginPath(); c.arc(ox, oy, ORB_R - 1.5 + pulse, 0, Math.PI * 2);
           c.strokeStyle = '#e8a33a'; c.lineWidth = 2.5; c.stroke();
           c.beginPath(); c.arc(ox, oy, 2.5, 0, Math.PI * 2); c.fillStyle = '#f7d27a'; c.fill();
           c.globalAlpha = 1;
         }
+
+        // The trail and the dust.
+        for (const p of this.trail) {
+          const a = p.life / 0.22;
+          c.globalAlpha = a * 0.3; c.fillStyle = '#e8a33a';
+          const sz = 2 + a * 5;
+          c.fillRect(p.x - this.dist - sz / 2, base - p.y - sz / 2, sz, sz);
+        }
+        for (const p of this.dust) {
+          c.globalAlpha = p.life / 0.3 * 0.7; c.fillStyle = '#9fb0a6';
+          c.fillRect(p.x - this.dist - 1, base - p.y - 1, 2, 2);
+        }
+        c.globalAlpha = 1;
 
         // The cube — or, just after a crash, its pieces.
         if (this.particles.length) {
@@ -1131,10 +1199,13 @@
           c.save();
           c.translate(PX + CUBE / 2, base - CUBE / 2 - this.y);
           c.rotate(this.rot);
-          c.fillStyle = this.state === 'dead' ? '#e2533b' : '#e8a33a';
-          c.fillRect(-CUBE / 2, -CUBE / 2, CUBE, CUBE);
+          const face = c.createLinearGradient(-CUBE / 2, -CUBE / 2, CUBE / 2, CUBE / 2);
+          if (this.state === 'dead') { face.addColorStop(0, '#f07a5a'); face.addColorStop(1, '#c23a22'); }
+          else { face.addColorStop(0, '#f7c766'); face.addColorStop(1, '#d88a22'); }
+          c.fillStyle = face; c.fillRect(-CUBE / 2, -CUBE / 2, CUBE, CUBE);
           c.fillStyle = '#1b2620'; c.fillRect(-CUBE / 2 + 3, -CUBE / 2 + 3, 4, 4); c.fillRect(1, -CUBE / 2 + 3, 4, 4);
-          c.fillRect(-CUBE / 2 + 3, 2, CUBE - 6, 3);
+          c.fillStyle = '#f3f7f4'; c.fillRect(-CUBE / 2 + 4, -CUBE / 2 + 4, 1.5, 1.5); c.fillRect(2, -CUBE / 2 + 4, 1.5, 1.5);
+          c.fillStyle = '#1b2620'; c.fillRect(-CUBE / 2 + 3, 2, CUBE - 6, 3);
           c.strokeStyle = '#1b2620'; c.lineWidth = 1.5; c.strokeRect(-CUBE / 2, -CUBE / 2, CUBE, CUBE);
           c.restore();
         }
@@ -1142,6 +1213,7 @@
         // Words
         c.font = '600 10px -apple-system, Segoe UI, Roboto, sans-serif';
         c.textBaseline = 'top'; c.textAlign = 'right';
+        c.shadowColor = 'rgba(0, 0, 0, .6)'; c.shadowBlur = 3;
         c.fillStyle = '#9fb0a6';
         if (this.state === 'idle') { c.fillText(this.best ? `best ${this.best} · tap ▶` : 'tap ▶', w - 5, 5); }
         else if (this.state === 'dead') {
@@ -1150,6 +1222,7 @@
         }
         else if (this.state === 'paused') { c.fillText(`paused · ${this.score}`, w - 5, 5); }
         else { c.fillStyle = '#f3f7f4'; c.fillText(String(this.score), w - 5, 5); c.textAlign = 'left'; c.fillStyle = '#9fb0a6'; c.fillText(`#${this.attempt}${this.auto ? ' auto' : ''}`, 5, 5); }
+        c.shadowBlur = 0;
       }
     }
     customElements.define('dash-widget', DashWidget);
@@ -1230,7 +1303,10 @@
         this.rng = seeded(seed);
         this.lane = 1; this.x = 1; this.jump = 0; this.roll = 0;
         this.speed = 0.9; this.dist = 0; this.coins = 0; this.items = []; this.nextAt = 0.5; this.spawned = 0;
-        this.newBest = false;
+        this.newBest = false; this.t = 0;
+        // Buildings either side of the track, and a skyline, from the seed.
+        this.blocks = Array.from({ length: 14 }, (_, k) => ({ z0: k / 14, side: k % 2 ? 1 : -1, h: 0.6 + this.rng() * 1.4, w: 0.5 + this.rng() * 0.6, tone: this.rng() }));
+        this.far = Array.from({ length: 30 }, () => ({ x: this.rng(), w: 0.02 + this.rng() * 0.05, h: 0.03 + this.rng() * 0.09 }));
       }
 
       start() {
@@ -1269,6 +1345,7 @@
       }
 
       step(dt) {
+        this.t += dt;
         this.dist += this.speed * dt * 14;                         // metres, for the score
         this.speed = Math.min(1.6, this.speed + dt * 0.012);
         this.x += (this.lane - this.x) * Math.min(1, dt * 12);     // the lane change glides
@@ -1309,67 +1386,149 @@
 
       draw() {
         if (!this.ctx) return;
-        const c = this.ctx, w = this.w, h = this.h;
+        const c = this.ctx, w = this.w, h = this.h, horizon = h * 0.34;
         c.clearRect(0, 0, w, h);
-        const sky = c.createLinearGradient(0, 0, 0, h);
-        sky.addColorStop(0, '#182a34'); sky.addColorStop(0.34, '#2a4a52'); sky.addColorStop(0.35, '#1c3a30'); sky.addColorStop(1, '#245040');
-        c.fillStyle = sky; c.fillRect(0, 0, w, h);
-        // The track: three lanes converging on the horizon.
+        // Dusk sky with a glow at the vanishing point, and a far city.
+        const sky = c.createLinearGradient(0, 0, 0, horizon);
+        sky.addColorStop(0, '#13222c'); sky.addColorStop(1, '#2a4a52');
+        c.fillStyle = sky; c.fillRect(0, 0, w, horizon + 1);
+        const glow = c.createRadialGradient(w / 2, horizon, 2, w / 2, horizon, w * 0.35);
+        glow.addColorStop(0, 'rgba(247, 210, 122, .45)'); glow.addColorStop(1, 'rgba(247, 210, 122, 0)');
+        c.fillStyle = glow; c.fillRect(0, 0, w, horizon + 1);
+        c.fillStyle = '#0f1f27';
+        for (const b of this.far) { const x = ((b.x - this.dist * 0.0004) % 1 + 1) % 1 * w; c.fillRect(x, horizon - b.h * h, b.w * w, b.h * h + 1); }
+        // Ground and track.
+        const ground = c.createLinearGradient(0, horizon, 0, h);
+        ground.addColorStop(0, '#1c3a30'); ground.addColorStop(1, '#122a22');
+        c.fillStyle = ground; c.fillRect(0, horizon, w, h - horizon);
         const near = this.proj(0), farP = this.proj(1);
         c.fillStyle = '#17323a';
         c.beginPath();
         c.moveTo(this.laneX(-0.5, near.s), near.y); c.lineTo(this.laneX(2.5, near.s), near.y);
         c.lineTo(this.laneX(2.5, farP.s), farP.y); c.lineTo(this.laneX(-0.5, farP.s), farP.y); c.closePath(); c.fill();
-        c.strokeStyle = 'rgba(159, 217, 196, .45)'; c.lineWidth = 1;
-        for (const l of [-0.5, 0.5, 1.5, 2.5]) { c.beginPath(); c.moveTo(this.laneX(l, near.s), near.y); c.lineTo(this.laneX(l, farP.s), farP.y); c.stroke(); }
-        // Sleepers scroll towards the camera.
-        for (let k = 0; k < 10; k++) {
-          const z = ((k / 10) + (this.dist * 0.02) % 0.1) % 1;
+        // Sleepers, then two rails per lane.
+        for (let k = 0; k < 14; k++) {
+          const z = ((k / 14) + (this.dist * 0.02) % (1 / 14)) % 1;
           const p = this.proj(z);
-          c.fillStyle = `rgba(159, 217, 196, ${0.08 + 0.15 * (1 - z)})`;
-          c.fillRect(this.laneX(-0.5, p.s), p.y, this.laneX(2.5, p.s) - this.laneX(-0.5, p.s), Math.max(1, 2 * p.s));
+          c.fillStyle = `rgba(90, 70, 50, ${0.25 + 0.5 * (1 - z)})`;
+          c.fillRect(this.laneX(-0.5, p.s), p.y - 1, this.laneX(2.5, p.s) - this.laneX(-0.5, p.s), Math.max(1, 2.5 * p.s));
         }
-        // Things on the track, far to near.
+        c.lineWidth = 1;
+        for (const l of [0, 1, 2]) for (const d of [-0.16, 0.16]) {
+          c.strokeStyle = 'rgba(200, 215, 210, .55)';
+          c.beginPath(); c.moveTo(this.laneX(l + d, near.s), near.y); c.lineTo(this.laneX(l + d, farP.s), farP.y); c.stroke();
+        }
+        c.strokeStyle = 'rgba(159, 217, 196, .25)';
+        for (const l of [-0.5, 2.5]) { c.beginPath(); c.moveTo(this.laneX(l, near.s), near.y); c.lineTo(this.laneX(l, farP.s), farP.y); c.stroke(); }
+        // Buildings rushing past on both sides.
+        const blocks = this.blocks.map((b) => ({ ...b, z: ((b.z0 - this.dist * 0.012) % 1 + 1) % 1 })).sort((a, b) => b.z - a.z);
+        for (const b of blocks) {
+          const p = this.proj(b.z), q = this.proj(Math.min(1, b.z + 0.08));
+          const x = this.laneX(b.side > 0 ? 3.2 : -1.2, p.s), bw = w * 0.18 * p.s * b.w, bh = h * 0.5 * p.s * b.h;
+          const x0 = b.side > 0 ? x : x - bw;
+          c.fillStyle = b.tone > 0.5 ? '#1a3440' : '#16303a';
+          c.fillRect(x0, p.y - bh, bw, bh);
+          c.fillStyle = b.tone > 0.5 ? '#244654' : '#1e3e4a';
+          const xq = this.laneX(b.side > 0 ? 3.2 : -1.2, q.s), bwq = w * 0.18 * q.s * b.w, bhq = h * 0.5 * q.s * b.h;
+          c.beginPath();
+          if (b.side > 0) { c.moveTo(x0, p.y - bh); c.lineTo(xq, q.y - bhq); c.lineTo(xq, q.y); c.lineTo(x0, p.y); }
+          else { c.moveTo(x0 + bw, p.y - bh); c.lineTo(xq, q.y - bhq); c.lineTo(xq, q.y); c.lineTo(x0 + bw, p.y); }
+          c.closePath(); c.fill();
+          c.fillStyle = 'rgba(247, 210, 122, .5)';
+          const step = Math.max(3, 6 * p.s);
+          for (let yy = p.y - bh + step; yy < p.y - step; yy += step) for (let xx = x0 + step * 0.6; xx < x0 + bw - step * 0.6; xx += step) if (((xx * 3 + yy * 5) | 0) % 7 < 3) c.fillRect(xx, yy, Math.max(1, step * 0.3), Math.max(1, step * 0.3));
+        }
+        // Things on the track, far to near, each with a shadow.
         const sorted = [...this.items].sort((a, b) => b.z - a.z);
         for (const it of sorted) {
           if (it.done) continue;
           const p = this.proj(Math.max(0, it.z));
           const x = this.laneX(it.lane, p.s), lw = w * 0.22 * p.s, u = h * 0.3 * p.s;
-          if (it.kind === 'coin') { c.fillStyle = '#e8a33a'; c.beginPath(); c.ellipse(x, p.y - u * 0.35, u * 0.14, u * 0.18, 0, 0, Math.PI * 2); c.fill(); c.fillStyle = '#f7d27a'; c.fillRect(x - 1, p.y - u * 0.45, 2, u * 0.2); }
-          else if (it.kind === 'low') { c.fillStyle = '#e2533b'; c.fillRect(x - lw / 2, p.y - u * 0.4, lw, u * 0.4); c.fillStyle = '#f3f7f4'; c.fillRect(x - lw / 2, p.y - u * 0.4, lw, Math.max(1, u * 0.08)); }
-          else if (it.kind === 'high') {
-            c.fillStyle = '#9fb0a6'; c.fillRect(x - lw / 2, p.y - u * 1.3, Math.max(1, lw * 0.08), u * 1.3); c.fillRect(x + lw / 2 - Math.max(1, lw * 0.08), p.y - u * 1.3, Math.max(1, lw * 0.08), u * 1.3);
+          if (it.kind === 'coin') {
+            const spin = Math.abs(Math.cos(this.t * 6 + it.z * 20));
+            c.fillStyle = 'rgba(0, 0, 0, .25)'; c.beginPath(); c.ellipse(x, p.y, u * 0.16, u * 0.05, 0, 0, Math.PI * 2); c.fill();
+            c.fillStyle = '#e8a33a'; c.beginPath(); c.ellipse(x, p.y - u * 0.35, u * 0.16 * spin + 0.5, u * 0.18, 0, 0, Math.PI * 2); c.fill();
+            c.fillStyle = '#fff1c2'; c.beginPath(); c.ellipse(x - u * 0.04 * spin, p.y - u * 0.4, u * 0.05 * spin + 0.3, u * 0.07, 0, 0, Math.PI * 2); c.fill();
+          } else if (it.kind === 'low') {
+            c.fillStyle = 'rgba(0, 0, 0, .3)'; c.fillRect(x - lw / 2, p.y - 1, lw, Math.max(1, 3 * p.s));
+            c.fillStyle = '#c23a22'; c.fillRect(x - lw / 2, p.y - u * 0.4, lw, u * 0.4);
+            c.fillStyle = '#f3f7f4';
+            for (let k = 0; k < 4; k += 2) c.fillRect(x - lw / 2 + lw * k / 4, p.y - u * 0.4, lw / 4, u * 0.4);
+            c.fillStyle = '#e2533b'; c.fillRect(x - lw / 2, p.y - u * 0.4, lw, Math.max(1, u * 0.1));
+          } else if (it.kind === 'high') {
+            const post = Math.max(1, lw * 0.08);
+            c.fillStyle = '#9fb0a6'; c.fillRect(x - lw / 2, p.y - u * 1.3, post, u * 1.3); c.fillRect(x + lw / 2 - post, p.y - u * 1.3, post, u * 1.3);
             c.fillStyle = '#e8a33a'; c.fillRect(x - lw / 2, p.y - u * 1.3, lw, u * 0.5);
+            c.fillStyle = '#1b2620';
+            for (let k = 0; k < 6; k += 2) c.fillRect(x - lw / 2 + lw * k / 6, p.y - u * 1.3, lw / 6, u * 0.5);
           } else {
-            // A train: its near face at z, its roof running back to z + TRAIN_LEN.
             const q = this.proj(Math.min(1, Math.max(0, it.z + TRAIN_LEN)));
             const xb = this.laneX(it.lane, q.s), lwb = w * 0.22 * q.s, ub = h * 0.3 * q.s;
+            c.fillStyle = 'rgba(0, 0, 0, .35)';
+            c.beginPath(); c.moveTo(x - lw * 0.55, p.y + 1); c.lineTo(xb - lwb * 0.55, q.y + 1); c.lineTo(xb + lwb * 0.55, q.y + 1); c.lineTo(x + lw * 0.55, p.y + 1); c.closePath(); c.fill();
             c.fillStyle = '#2d6650';
             c.beginPath(); c.moveTo(x - lw / 2, p.y - u * 1.2); c.lineTo(xb - lwb / 2, q.y - ub * 1.2); c.lineTo(xb + lwb / 2, q.y - ub * 1.2); c.lineTo(x + lw / 2, p.y - u * 1.2); c.closePath(); c.fill();
-            c.fillStyle = '#3d8e70'; c.fillRect(x - lw / 2, p.y - u * 1.2, lw, u * 1.2);
-            c.fillStyle = '#9fd9c4'; c.fillRect(x - lw / 2 + lw * 0.15, p.y - u * 1.05, lw * 0.3, u * 0.35); c.fillRect(x + lw / 2 - lw * 0.45, p.y - u * 1.05, lw * 0.3, u * 0.35);
-            c.fillStyle = '#e8a33a'; c.fillRect(x - lw / 2 + lw * 0.1, p.y - u * 0.5, lw * 0.2, u * 0.15); c.fillRect(x + lw / 2 - lw * 0.3, p.y - u * 0.5, lw * 0.2, u * 0.15);
+            const side = it.lane < this.x ? 1 : -1;
+            c.fillStyle = '#245040';
+            c.beginPath(); c.moveTo(x + side * lw / 2, p.y - u * 1.2); c.lineTo(xb + side * lwb / 2, q.y - ub * 1.2); c.lineTo(xb + side * lwb / 2, q.y); c.lineTo(x + side * lw / 2, p.y); c.closePath(); c.fill();
+            const body = c.createLinearGradient(0, p.y - u * 1.2, 0, p.y);
+            body.addColorStop(0, '#4aa284'); body.addColorStop(0.7, '#3d8e70'); body.addColorStop(1, '#2d6650');
+            c.fillStyle = body; c.fillRect(x - lw / 2, p.y - u * 1.2, lw, u * 1.2);
+            c.fillStyle = '#9fd9c4'; c.fillRect(x - lw / 2 + lw * 0.12, p.y - u * 1.05, lw * 0.32, u * 0.38); c.fillRect(x + lw / 2 - lw * 0.44, p.y - u * 1.05, lw * 0.32, u * 0.38);
+            c.fillStyle = 'rgba(255, 255, 255, .35)'; c.fillRect(x - lw / 2 + lw * 0.14, p.y - u * 1.03, lw * 0.1, u * 0.3);
+            c.shadowColor = '#fff1c2'; c.shadowBlur = 6 * p.s;
+            c.fillStyle = '#fff1c2'; c.fillRect(x - lw / 2 + lw * 0.1, p.y - u * 0.5, lw * 0.2, u * 0.15); c.fillRect(x + lw / 2 - lw * 0.3, p.y - u * 0.5, lw * 0.2, u * 0.15);
+            c.shadowBlur = 0;
+            c.fillStyle = '#1b2620'; c.fillRect(x - lw / 2 + lw * 0.1, p.y - u * 0.12, lw * 0.2, u * 0.12); c.fillRect(x + lw / 2 - lw * 0.3, p.y - u * 0.12, lw * 0.2, u * 0.12);
           }
         }
-        // The runner: a hooded figure, mid-jump or rolled up.
-        const pr = this.proj(0), px = this.laneX(this.x, pr.s), ph = h * 0.3;
+        // The runner: hoodie, legs in a running cycle, arms, a head, and a
+        // shadow on the ground that stays there when they jump.
+        const pr = this.proj(0), px = this.laneX(this.x, pr.s), ph = h * 0.38;
         const lift = this.jump > 0 ? Math.sin(Math.PI * (1 - this.jump / JUMP_T)) * h * 0.22 : 0;
-        const squash = this.roll > 0 ? 0.55 : 1;
-        const bodyH = ph * 0.6 * squash, bodyW = w * 0.07;
+        c.fillStyle = 'rgba(0, 0, 0, .35)'; c.beginPath(); c.ellipse(px, pr.y, w * 0.055, ph * 0.06, 0, 0, Math.PI * 2); c.fill();
         const baseY = pr.y - lift;
-        c.fillStyle = this.state === 'dead' ? '#e2533b' : '#e8a33a';
-        c.fillRect(px - bodyW / 2, baseY - bodyH, bodyW, bodyH);
-        c.fillStyle = '#f3d6b0'; c.beginPath(); c.arc(px, baseY - bodyH - ph * 0.12 * squash, ph * 0.12, 0, Math.PI * 2); c.fill();
-        c.fillStyle = '#1b2620'; c.fillRect(px - bodyW / 2, baseY - bodyH * 0.25, bodyW * 0.4, bodyH * 0.25); c.fillRect(px + bodyW * 0.1, baseY - bodyH * 0.25, bodyW * 0.4, bodyH * 0.25);
+        const bodyW = w * 0.085, phase = this.dist * 0.6;
+        const col = this.state === 'dead' ? '#e2533b' : '#e8a33a';
+        if (this.roll > 0) {
+          c.fillStyle = col; c.beginPath(); c.arc(px, baseY - ph * 0.18, ph * 0.18, 0, Math.PI * 2); c.fill();
+          c.fillStyle = '#1b2620'; c.beginPath(); c.arc(px, baseY - ph * 0.18, ph * 0.08, 0, Math.PI * 2); c.fill();
+        } else {
+          const legH = ph * 0.22, swing = this.jump > 0 ? 0.2 : Math.sin(phase);
+          c.strokeStyle = '#1b2620'; c.lineWidth = Math.max(2, bodyW * 0.3); c.lineCap = 'round';
+          c.beginPath(); c.moveTo(px - bodyW * 0.25, baseY - legH); c.lineTo(px - bodyW * 0.25 + swing * bodyW * 0.5, baseY); c.stroke();
+          c.beginPath(); c.moveTo(px + bodyW * 0.25, baseY - legH); c.lineTo(px + bodyW * 0.25 - swing * bodyW * 0.5, baseY); c.stroke();
+          const torsoH = ph * 0.32, torsoY = baseY - legH - torsoH;
+          const hood = c.createLinearGradient(px - bodyW / 2, 0, px + bodyW / 2, 0);
+          hood.addColorStop(0, col); hood.addColorStop(1, this.state === 'dead' ? '#b02e18' : '#c47f1e');
+          c.fillStyle = hood; c.fillRect(px - bodyW / 2, torsoY, bodyW, torsoH);
+          c.fillStyle = '#1b2620'; c.fillRect(px - bodyW / 2, torsoY + torsoH * 0.6, bodyW, torsoH * 0.12);
+          c.strokeStyle = col; c.lineWidth = Math.max(2, bodyW * 0.25);
+          c.beginPath(); c.moveTo(px - bodyW / 2, torsoY + torsoH * 0.2); c.lineTo(px - bodyW * 0.8, torsoY + torsoH * 0.2 - swing * ph * 0.08); c.stroke();
+          c.beginPath(); c.moveTo(px + bodyW / 2, torsoY + torsoH * 0.2); c.lineTo(px + bodyW * 0.8, torsoY + torsoH * 0.2 + swing * ph * 0.08); c.stroke();
+          c.fillStyle = col; c.beginPath(); c.arc(px, torsoY - ph * 0.1, ph * 0.13, 0, Math.PI * 2); c.fill();
+          c.fillStyle = '#f3d6b0'; c.beginPath(); c.arc(px, torsoY - ph * 0.08, ph * 0.09, 0, Math.PI * 2); c.fill();
+        }
+        // Speed lines when it is getting quick.
+        if (this.state === 'running' && this.speed > 1.15) {
+          c.strokeStyle = `rgba(243, 247, 244, ${(this.speed - 1.15) * 0.6})`; c.lineWidth = 1;
+          for (let k = 0; k < 6; k++) {
+            const y = horizon + ((k * 37 + this.dist * 40) % (h - horizon));
+            const x = k % 2 ? w - 4 - (k * 9) : 4 + k * 9;
+            c.beginPath(); c.moveTo(x, y); c.lineTo(x, y + 8); c.stroke();
+          }
+        }
         // Words
         const fs = Math.max(10, Math.min(14, h / 7));
         c.font = `600 ${fs}px -apple-system, Segoe UI, Roboto, sans-serif`;
         c.textBaseline = 'top'; c.textAlign = 'left';
+        c.shadowColor = 'rgba(0, 0, 0, .6)'; c.shadowBlur = 3;
         c.fillStyle = '#f3f7f4';
         if (this.state === 'idle') { c.fillStyle = '#9fb0a6'; c.fillText(this.best ? `best ${this.best} m` : 'swipe to steer', 6, 5); c.textAlign = 'right'; c.fillText('tap ▶', w - 6, 5); }
         else if (this.state === 'dead') { c.fillStyle = this.newBest ? '#e8a33a' : '#e2533b'; c.fillText(this.newBest ? `★ new best ${Math.floor(this.dist)} m` : `✕ ${Math.floor(this.dist)} m · best ${this.best} m`, 6, 5); c.textAlign = 'right'; c.fillStyle = '#9fb0a6'; c.fillText('tap ▶', w - 6, 5); }
         else if (this.state === 'paused') { c.fillStyle = '#9fb0a6'; c.fillText(`paused · ${Math.floor(this.dist)} m`, 6, 5); }
         else { c.fillText(`${Math.floor(this.dist)} m`, 6, 5); c.textAlign = 'right'; c.fillStyle = '#e8a33a'; c.fillText(`● ${this.coins}`, w - 6, 5); }
+        c.shadowBlur = 0;
       }
     }
     customElements.define('surf-widget', SurfWidget);
