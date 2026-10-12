@@ -38,6 +38,44 @@ apps/mobile       Capacitor shell (Android + iOS) wrapping the same build.
 *.html (root)     the original single-file apps, STILL LIVE. Do not delete.
 game.html         Trail Jumper, a small canvas platformer. Not a navigator —
                   one file, no build, copied to Pages beside the others.
+calculator.html   a scientific calculator, the same shape: one file, a
+                  native web component, no build. An expression with
+                  precedence and brackets (2 + 3 × 4 = 14, −3² = −9), trig in
+                  degrees or radians, logs, powers, roots, factorial, π, e,
+                  Ans, Ran#, a 2nd layer. 15 significant digits, a tape of past
+                  sums in localStorage under `calc:tape`, DEG/RAD under
+                  `calc:deg`. Under its top bar, the width of the phone, a
+                  Geometry Dash-style runner (`<dash-widget>`, a 52-unit
+                  world scaled to a band that follows the screen's height and
+                  yields to the calculator's minimum) over terrain generated from a
+                  seed per attempt — steps, pits, spikes, a skyline, and
+                  past 500 units jump pads before walls four levels tall and
+                  jump orbs over pits too wide for one jump — with a whole
+                  jump's worth of flat after every feature so it is always
+                  fair (a perfect pilot survives 60 seeds × 40 s): tap the widget, the ▲ button top-right or
+                  space to start and to jump, hold to keep jumping, AUTO to
+                  let the pilot play (its runs are not a best), best under
+                  `calc:dash`; it draws only while a run is on and
+                  pauses under the history panel. Below it, on phones 700px
+                  or taller, a Subway-Surfers-style runner (`<surf-widget>`):
+                  three lanes seen from behind, swipe to change lane, up to
+                  jump a low barrier, down to roll under a high one, trains
+                  to dodge, coins to collect; arrows steer it during a run
+                  and are the caret's otherwise; best under `calc:surf`.
+                  Both are drawn with some care — a night city and a moon
+                  behind the cube, buildings streaming past the lanes — and
+                  lit by ray-cast light (`castLight`, `applyLighting`): rays
+                  from each lamp stop at the first edge they hit, so blocks,
+                  spikes, barriers and trains throw real shadows, soft ones —
+                  each lamp is sampled at five points and the samples added
+                  into a coverage mask, so a spot only some can see is a
+                  penumbra; RT in the bar toggles it, under `calc:rt`. Every draw()
+                  guards a missing canvas, so jsdom can run them. Writing two things
+                  together (2π) binds tighter than ÷, as on a Casio. A caret
+                  (tap a token, or ← →) edits anywhere in the expression;
+                  tapping the result copies it. `scripts/calculator.test.ts`
+                  loads the file into jsdom and drives the arithmetic and the
+                  terrain generator, so CI guards both.
 ```
 
 Inside the hike app, roughly in the order a walker meets them:
@@ -951,7 +989,7 @@ Pages CDN caches 404s, so a path a deploy just added keeps answering 404.
 ```bash
 pnpm install
 pnpm typecheck          # tsc --build across all projects
-pnpm test               # vitest, 362 tests
+pnpm test               # vitest, 421 tests
 pnpm build              # web build for Pages
 pnpm --filter @slownav/web build:native   # payload for the APK
 pnpm --filter @slownav/web dev            # local dev server
