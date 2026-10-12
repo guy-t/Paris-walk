@@ -66,8 +66,10 @@ calculator.html   a scientific calculator, the same shape: one file, a
                   behind the cube, buildings streaming past the lanes — and
                   lit by ray-cast light (`castLight`, `applyLighting`): rays
                   from each lamp stop at the first edge they hit, so blocks,
-                  spikes, barriers and trains throw real shadows; RT in the
-                  bar toggles it, remembered under `calc:rt`. Every draw()
+                  spikes, barriers and trains throw real shadows, soft ones —
+                  each lamp is sampled at five points and the samples added
+                  into a coverage mask, so a spot only some can see is a
+                  penumbra; RT in the bar toggles it, under `calc:rt`. Every draw()
                   guards a missing canvas, so jsdom can run them. Writing two things
                   together (2π) binds tighter than ÷, as on a Casio. A caret
                   (tap a token, or ← →) edits anywhere in the expression;

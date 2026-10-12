@@ -771,48 +771,75 @@
       { x1: x + w, y1: y + h, x2: x, y2: y + h }, { x1: x, y1: y + h, x2: x, y2: y },
     ];
 
-    // Draws the lit scene over the plain one: darkness everywhere, cut away
-    // inside each light's polygon with a falloff, then a tinted glow added.
-    // `lights` are {x, y, r, color}; `segs` the edges that cast shadows.
-    const applyLighting = (ctx, lctx, lightCanvas, w, h, lights, segs, dark) => {
+    // Draws the lit scene over the plain one. A light has a size, not a
+    // point: it is sampled at `samples` positions `spread` apart, each
+    // casting its own rays, and the samples are added into a coverage mask
+    // at a fraction of weight each — where only some of them can see a
+    // spot, the shadow is partial, which is a penumbra. The mask carries a
+    // smooth falloff from the centre, is blurred a touch where the browser
+    // can, and is used twice: to cut the light out of the darkness, and,
+    // tinted, as the glow laid over the scene. `lights` are {x, y, r,
+    // samples?}; `segs` the edges that cast shadows.
+    const SOFT_SAMPLES = 5;
+    const applyLighting = (ctx, lctx, lightCanvas, mctx, maskCanvas, w, h, lights, segs, dark, spread, blur) => {
+      const xf = ctx.getTransform();
+      // 1. The coverage mask.
+      mctx.save();
+      mctx.setTransform(xf);
+      mctx.globalCompositeOperation = 'source-over';
+      mctx.clearRect(0, 0, w, h);
+      mctx.globalCompositeOperation = 'lighter';
+      for (const l of lights) {
+        const n = l.samples || SOFT_SAMPLES;
+        for (let k = 0; k < n; k++) {
+          const a = (k / n) * Math.PI * 2, rr = n > 1 ? spread : 0;
+          const sx = l.x + Math.cos(a) * rr, sy = l.y + Math.sin(a) * rr;
+          const poly = castLight(sx, sy, l.r, segs);
+          if (poly.length < 3) continue;
+          mctx.save();
+          mctx.beginPath(); mctx.moveTo(poly[0][0], poly[0][1]);
+          for (const [x, y] of poly) mctx.lineTo(x, y);
+          mctx.closePath(); mctx.clip();
+          const g = mctx.createRadialGradient(l.x, l.y, 0, l.x, l.y, l.r);
+          const wgt = 1 / n;
+          g.addColorStop(0, `rgba(255, 255, 255, ${wgt})`);
+          g.addColorStop(0.3, `rgba(255, 255, 255, ${wgt * 0.85})`);
+          g.addColorStop(0.6, `rgba(255, 255, 255, ${wgt * 0.42})`);
+          g.addColorStop(0.85, `rgba(255, 255, 255, ${wgt * 0.1})`);
+          g.addColorStop(1, 'rgba(255, 255, 255, 0)');
+          mctx.fillStyle = g; mctx.fillRect(l.x - l.r, l.y - l.r, 2 * l.r, 2 * l.r);
+          mctx.restore();
+        }
+      }
+      mctx.restore();
+      // 2. Darkness, with the mask cut out of it.
       lctx.save();
-      lctx.setTransform(ctx.getTransform());
+      lctx.setTransform(1, 0, 0, 1, 0, 0);
       lctx.globalCompositeOperation = 'source-over';
-      lctx.clearRect(0, 0, w, h);
-      lctx.fillStyle = `rgba(3, 8, 14, ${dark})`; lctx.fillRect(0, 0, w, h);
+      lctx.clearRect(0, 0, lightCanvas.width, lightCanvas.height);
+      lctx.fillStyle = `rgba(3, 8, 14, ${dark})`; lctx.fillRect(0, 0, lightCanvas.width, lightCanvas.height);
       lctx.globalCompositeOperation = 'destination-out';
-      const polys = lights.map((l) => castLight(l.x, l.y, l.r, segs));
-      lights.forEach((l, i) => {
-        const poly = polys[i];
-        if (poly.length < 3) return;
-        lctx.save();
-        lctx.beginPath(); lctx.moveTo(poly[0][0], poly[0][1]);
-        for (const [x, y] of poly) lctx.lineTo(x, y);
-        lctx.closePath(); lctx.clip();
-        const g = lctx.createRadialGradient(l.x, l.y, 0, l.x, l.y, l.r);
-        g.addColorStop(0, 'rgba(0, 0, 0, 1)'); g.addColorStop(0.45, 'rgba(0, 0, 0, .8)'); g.addColorStop(1, 'rgba(0, 0, 0, 0)');
-        lctx.fillStyle = g; lctx.fillRect(l.x - l.r, l.y - l.r, 2 * l.r, 2 * l.r);
-        lctx.restore();
-      });
+      lctx.drawImage(maskCanvas, 0, 0);
       lctx.restore();
+      // 3. Over the scene, softened a touch where the browser can.
+      const canBlur = 'filter' in ctx;
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
+      if (canBlur) ctx.filter = `blur(${blur}px)`;
       ctx.drawImage(lightCanvas, 0, 0);
       ctx.restore();
+      // 4. The glow: the same mask, tinted warm, added on.
+      mctx.save();
+      mctx.setTransform(1, 0, 0, 1, 0, 0);
+      mctx.globalCompositeOperation = 'source-in';
+      mctx.fillStyle = 'rgb(255, 196, 110)'; mctx.fillRect(0, 0, maskCanvas.width, maskCanvas.height);
+      mctx.restore();
       ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.globalCompositeOperation = 'lighter';
-      lights.forEach((l, i) => {
-        const poly = polys[i];
-        if (poly.length < 3) return;
-        ctx.save();
-        ctx.beginPath(); ctx.moveTo(poly[0][0], poly[0][1]);
-        for (const [x, y] of poly) ctx.lineTo(x, y);
-        ctx.closePath(); ctx.clip();
-        const g = ctx.createRadialGradient(l.x, l.y, 0, l.x, l.y, l.r);
-        g.addColorStop(0, l.color.replace('A', '0.28')); g.addColorStop(1, l.color.replace('A', '0'));
-        ctx.fillStyle = g; ctx.fillRect(l.x - l.r, l.y - l.r, 2 * l.r, 2 * l.r);
-        ctx.restore();
-      });
+      ctx.globalAlpha = 0.26;
+      if (canBlur) ctx.filter = `blur(${blur * 1.5}px)`;
+      ctx.drawImage(maskCanvas, 0, 0);
       ctx.restore();
     };
 
@@ -856,6 +883,8 @@
         this.rt = stored(RT_KEY, true) !== false;
         this.lightCanvas = document.createElement('canvas');
         this.lctx = this.lightCanvas.getContext('2d');
+        this.maskCanvas = document.createElement('canvas');
+        this.mctx = this.maskCanvas.getContext('2d');
         this.reset(1);
         this.held = false; this.buffer = -Infinity; this.particles = []; this.auto = false;
         this.canvas.addEventListener('pointerdown', (e) => { e.preventDefault(); this.press(); });
@@ -948,6 +977,8 @@
         this.h = 52; this.w = Math.max(1, r.width / zoom);
         this.canvas.width = Math.round(r.width * dpr); this.canvas.height = Math.round(r.height * dpr);
         this.lightCanvas.width = this.canvas.width; this.lightCanvas.height = this.canvas.height;
+        this.maskCanvas.width = this.canvas.width; this.maskCanvas.height = this.canvas.height;
+        this.zoom = zoom; this.dpr = dpr;
         this.ctx.setTransform(dpr * zoom, 0, 0, dpr * zoom, 0, 0);
         this.draw();
       }
@@ -1325,18 +1356,18 @@
 
         // Ray-traced light: the cube carries a lamp, orbs and pads shine, the
         // blocks and spikes throw shadows.
-        if (this.rt && this.lctx) {
+        if (this.rt && this.lctx && this.mctx) {
           const lights = [];
-          if (!this.particles.length) lights.push({ x: PX + CUBE / 2, y: base - CUBE / 2 - this.y, r: 70, color: 'rgba(255, 200, 110, A)' });
-          for (const o of this.orbs) if (!o.used && o.x - this.dist > -20 && o.x - this.dist < w + 20) lights.push({ x: o.x - this.dist, y: base - o.y, r: 26, color: 'rgba(232, 163, 58, A)' });
+          if (!this.particles.length) lights.push({ x: PX + CUBE / 2, y: base - CUBE / 2 - this.y, r: 70 });
+          for (const o of this.orbs) if (!o.used && o.x - this.dist > -20 && o.x - this.dist < w + 20) lights.push({ x: o.x - this.dist, y: base - o.y, r: 26, samples: 3 });
           for (let i = this.col0; i < this.col0 + this.cols.length; i++) {
             const col = this.col(i);
             if (!col.pad || col.used) continue;
             const sx = i * CELL - this.dist;
             if (sx < -20 || sx > w + 20) continue;
-            lights.push({ x: sx + CELL / 2, y: base - col.h * LEVEL - 3, r: 18, color: 'rgba(232, 163, 58, A)' });
+            lights.push({ x: sx + CELL / 2, y: base - col.h * LEVEL - 3, r: 18, samples: 3 });
           }
-          applyLighting(c, this.lctx, this.lightCanvas, w, h, lights, this.occluders(), 0.55);
+          applyLighting(c, this.lctx, this.lightCanvas, this.mctx, this.maskCanvas, w, h, lights, this.occluders(), 0.55, 2.2, 1.2 * (this.zoom || 1) * (this.dpr || 1));
         }
 
         // Words
@@ -1383,6 +1414,8 @@
         this.rt = stored(RT_KEY, true) !== false;
         this.lightCanvas = document.createElement('canvas');
         this.lctx = this.lightCanvas.getContext('2d');
+        this.maskCanvas = document.createElement('canvas');
+        this.mctx = this.maskCanvas.getContext('2d');
         this.reset(1);
         this.canvas.addEventListener('pointerdown', (e) => { e.preventDefault(); this.from = { x: e.clientX, y: e.clientY }; });
         this.onUp = (e) => {
@@ -1429,6 +1462,8 @@
         this.w = Math.max(1, r.width); this.h = Math.max(1, r.height);
         this.canvas.width = Math.round(this.w * dpr); this.canvas.height = Math.round(this.h * dpr);
         this.lightCanvas.width = this.canvas.width; this.lightCanvas.height = this.canvas.height;
+        this.maskCanvas.width = this.canvas.width; this.maskCanvas.height = this.canvas.height;
+        this.dpr = dpr;
         this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         this.draw();
       }
@@ -1585,8 +1620,8 @@
           else if (it.kind === 'high') segs.push(...rectEdges(x - lw / 2, p.y - u * 1.3, lw, u * 0.5));
           else if (it.kind === 'train') {
             segs.push(...rectEdges(x - lw / 2, p.y - u * 1.2, lw, u * 1.2));
-            if (it.z > 0.02) lights.push({ x: x - lw / 2 + lw * 0.2, y: p.y - u * 0.42, r: lw * 1.6, color: 'rgba(255, 241, 194, A)' }, { x: x + lw / 2 - lw * 0.2, y: p.y - u * 0.42, r: lw * 1.6, color: 'rgba(255, 241, 194, A)' });
-          } else lights.push({ x, y: p.y - u * 0.35, r: u * 0.9, color: 'rgba(232, 163, 58, A)' });
+            if (it.z > 0.02) lights.push({ x: x - lw / 2 + lw * 0.2, y: p.y - u * 0.42, r: lw * 1.6, samples: 2 }, { x: x + lw / 2 - lw * 0.2, y: p.y - u * 0.42, r: lw * 1.6, samples: 2 });
+          } else lights.push({ x, y: p.y - u * 0.35, r: u * 0.9, samples: 1 });
           if (it.kind === 'coin') {
             const spin = Math.abs(Math.cos(this.t * 6 + it.z * 20));
             c.fillStyle = 'rgba(0, 0, 0, .25)'; c.beginPath(); c.ellipse(x, p.y, u * 0.16, u * 0.05, 0, 0, Math.PI * 2); c.fill();
@@ -1654,9 +1689,9 @@
         }
         // Ray-traced light: the runner carries a lamp, trains their headlights,
         // coins a glint; barriers, signs and train faces throw shadows.
-        if (this.rt && this.lctx) {
-          lights.push({ x: px, y: baseY - ph * 0.4, r: w * 0.42, color: 'rgba(255, 200, 110, A)' });
-          applyLighting(c, this.lctx, this.lightCanvas, w, h, lights, segs, 0.5);
+        if (this.rt && this.lctx && this.mctx) {
+          lights.push({ x: px, y: baseY - ph * 0.4, r: w * 0.42 });
+          applyLighting(c, this.lctx, this.lightCanvas, this.mctx, this.maskCanvas, w, h, lights, segs, 0.5, w * 0.012, 1.5 * (this.dpr || 1));
         }
 
         // Speed lines when it is getting quick.
