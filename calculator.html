@@ -39,8 +39,9 @@
     /* The jump button: the cube's colour, and a size a thumb finds without looking. */
     .top button.jump { background: var(--eq); color: #1b2620; width: 52px; font-size: 20px; font-weight: 700; line-height: 36px; }
     .top button.jump:active { background: var(--eq-on); transform: scale(.94); }
-    .top button.auto { width: auto; padding: 0 12px; font-size: 12px; font-weight: 700; letter-spacing: .06em; color: var(--muted); }
-    .top button.auto[aria-pressed="true"] { background: var(--op-on); color: var(--ink); }
+    .top button.auto, .top button.rt { width: auto; padding: 0 12px; font-size: 12px; font-weight: 700; letter-spacing: .06em; color: var(--muted); }
+    .top button.auto[aria-pressed="true"], .top button.rt[aria-pressed="true"] { background: var(--op-on); color: var(--ink); }
+    .top button.rt { padding: 0 10px; }
     .top a, .top button {
       width: 36px; height: 36px; border-radius: 18px; border: 0; padding: 0; cursor: pointer; touch-action: manipulation;
       background: rgba(255, 255, 255, .12); color: #fff; font-size: 17px; line-height: 36px; text-align: center;
@@ -58,6 +59,7 @@
       <a href="index.html" aria-label="Back to Slow Navigator">✕</a>
     </div>
     <div class="right">
+      <button id="rtBtn" class="rt" aria-pressed="true" aria-label="Ray-traced lighting" title="Ray-traced light and shadow">RT</button>
       <button id="autoBtn" class="auto" aria-pressed="false" aria-label="Autopilot" title="Let the cube play itself">AUTO</button>
       <button id="jumpBtn" class="jump" aria-label="Jump" title="Jump (space)">▲</button>
       <button id="tapeBtn" aria-label="Show history" title="History">≡</button>
@@ -728,6 +730,92 @@
 
     customElements.define('slow-calc', SlowCalc);
 
+    // ---- Ray-traced light -------------------------------------------------
+    // Light in two dimensions, done honestly: from a source, rays are cast
+    // against every edge in the scene and stop at the first one they hit,
+    // and the lit region is the polygon those ray ends make. Two extra rays
+    // either side of every edge's end keep the shadows sharp. Everything
+    // outside the lit polygons is left in the dark; inside, a glow falls
+    // off with distance. Cheap enough for a phone: a few dozen edges and a
+    // couple of hundred rays a frame.
+    const RT_KEY = 'calc:rt';
+    const castLight = (cx, cy, radius, segs) => {
+      const angles = [];
+      for (let i = 0; i < 48; i++) angles.push((i / 48) * Math.PI * 2);
+      for (const sg of segs) {
+        for (const [px, py] of [[sg.x1, sg.y1], [sg.x2, sg.y2]]) {
+          if (Math.abs(px - cx) > radius || Math.abs(py - cy) > radius) continue;
+          const a = Math.atan2(py - cy, px - cx);
+          angles.push(a - 0.0006, a + 0.0006);
+        }
+      }
+      angles.sort((a, b) => a - b);
+      const pts = [];
+      for (const a of angles) {
+        const dx = Math.cos(a), dy = Math.sin(a);
+        let best = radius;
+        for (const sg of segs) {
+          const ex = sg.x2 - sg.x1, ey = sg.y2 - sg.y1;
+          const den = dx * ey - dy * ex;
+          if (Math.abs(den) < 1e-9) continue;
+          const t = ((sg.x1 - cx) * ey - (sg.y1 - cy) * ex) / den;
+          const u = ((sg.x1 - cx) * dy - (sg.y1 - cy) * dx) / den;
+          if (t > 0 && u >= 0 && u <= 1 && t < best) best = t;
+        }
+        pts.push([cx + dx * best, cy + dy * best]);
+      }
+      return pts;
+    };
+    const rectEdges = (x, y, w, h) => [
+      { x1: x, y1: y, x2: x + w, y2: y }, { x1: x + w, y1: y, x2: x + w, y2: y + h },
+      { x1: x + w, y1: y + h, x2: x, y2: y + h }, { x1: x, y1: y + h, x2: x, y2: y },
+    ];
+
+    // Draws the lit scene over the plain one: darkness everywhere, cut away
+    // inside each light's polygon with a falloff, then a tinted glow added.
+    // `lights` are {x, y, r, color}; `segs` the edges that cast shadows.
+    const applyLighting = (ctx, lctx, lightCanvas, w, h, lights, segs, dark) => {
+      lctx.save();
+      lctx.setTransform(ctx.getTransform());
+      lctx.globalCompositeOperation = 'source-over';
+      lctx.clearRect(0, 0, w, h);
+      lctx.fillStyle = `rgba(3, 8, 14, ${dark})`; lctx.fillRect(0, 0, w, h);
+      lctx.globalCompositeOperation = 'destination-out';
+      const polys = lights.map((l) => castLight(l.x, l.y, l.r, segs));
+      lights.forEach((l, i) => {
+        const poly = polys[i];
+        if (poly.length < 3) return;
+        lctx.save();
+        lctx.beginPath(); lctx.moveTo(poly[0][0], poly[0][1]);
+        for (const [x, y] of poly) lctx.lineTo(x, y);
+        lctx.closePath(); lctx.clip();
+        const g = lctx.createRadialGradient(l.x, l.y, 0, l.x, l.y, l.r);
+        g.addColorStop(0, 'rgba(0, 0, 0, 1)'); g.addColorStop(0.45, 'rgba(0, 0, 0, .8)'); g.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        lctx.fillStyle = g; lctx.fillRect(l.x - l.r, l.y - l.r, 2 * l.r, 2 * l.r);
+        lctx.restore();
+      });
+      lctx.restore();
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.drawImage(lightCanvas, 0, 0);
+      ctx.restore();
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      lights.forEach((l, i) => {
+        const poly = polys[i];
+        if (poly.length < 3) return;
+        ctx.save();
+        ctx.beginPath(); ctx.moveTo(poly[0][0], poly[0][1]);
+        for (const [x, y] of poly) ctx.lineTo(x, y);
+        ctx.closePath(); ctx.clip();
+        const g = ctx.createRadialGradient(l.x, l.y, 0, l.x, l.y, l.r);
+        g.addColorStop(0, l.color.replace('A', '0.28')); g.addColorStop(1, l.color.replace('A', '0'));
+        ctx.fillStyle = g; ctx.fillRect(l.x - l.r, l.y - l.r, 2 * l.r, 2 * l.r);
+        ctx.restore();
+      });
+      ctx.restore();
+    };
+
     // ---- The runner in the corner ----------------------------------------
     // A cube that runs and jumps, Geometry-Dash fashion, over terrain made
     // up as it goes: ground that steps up and down, pits, spikes on whatever
@@ -765,6 +853,9 @@
         this.best = +stored(DASH_KEY, 0) || 0;
         this.attempt = 0;
         this.state = 'idle';
+        this.rt = stored(RT_KEY, true) !== false;
+        this.lightCanvas = document.createElement('canvas');
+        this.lctx = this.lightCanvas.getContext('2d');
         this.reset(1);
         this.held = false; this.buffer = -Infinity; this.particles = []; this.auto = false;
         this.canvas.addEventListener('pointerdown', (e) => { e.preventDefault(); this.press(); });
@@ -856,8 +947,30 @@
         const zoom = Math.max(r.height, 1) / 52;
         this.h = 52; this.w = Math.max(1, r.width / zoom);
         this.canvas.width = Math.round(r.width * dpr); this.canvas.height = Math.round(r.height * dpr);
+        this.lightCanvas.width = this.canvas.width; this.lightCanvas.height = this.canvas.height;
         this.ctx.setTransform(dpr * zoom, 0, 0, dpr * zoom, 0, 0);
         this.draw();
+      }
+      setRT(on) { this.rt = on; this.draw(); }
+
+      // What casts a shadow: the top of every block, each face where the
+      // ground changes height, and the two slopes of a spike.
+      occluders() {
+        const segs = [], base = this.h - 6 + this.cam;
+        for (let i = this.col0; i < this.col0 + this.cols.length; i++) {
+          const col = this.col(i);
+          const sx = i * CELL - this.dist;
+          if (sx > this.w + 10 || sx + CELL < -10 || col.h === null) continue;
+          const top = base - col.h * LEVEL;
+          segs.push({ x1: sx, y1: top, x2: sx + CELL, y2: top });
+          const prev = this.col(i - 1);
+          if (prev && prev.h !== null && prev.h !== col.h) segs.push({ x1: sx, y1: top, x2: sx, y2: base - prev.h * LEVEL });
+          else if (prev && prev.h === null) segs.push({ x1: sx, y1: top, x2: sx, y2: this.h });
+          const next = this.col(i + 1);
+          if (next && next.h === null) segs.push({ x1: sx + CELL, y1: top, x2: sx + CELL, y2: this.h });
+          if (col.spike) { segs.push({ x1: sx, y1: top, x2: sx + CELL / 2, y2: top - SPIKE_H }, { x1: sx + CELL / 2, y1: top - SPIKE_H, x2: sx + CELL, y2: top }); }
+        }
+        return segs;
       }
 
       // ---- Terrain -------------------------------------------------------
@@ -1210,6 +1323,22 @@
           c.restore();
         }
 
+        // Ray-traced light: the cube carries a lamp, orbs and pads shine, the
+        // blocks and spikes throw shadows.
+        if (this.rt && this.lctx) {
+          const lights = [];
+          if (!this.particles.length) lights.push({ x: PX + CUBE / 2, y: base - CUBE / 2 - this.y, r: 70, color: 'rgba(255, 200, 110, A)' });
+          for (const o of this.orbs) if (!o.used && o.x - this.dist > -20 && o.x - this.dist < w + 20) lights.push({ x: o.x - this.dist, y: base - o.y, r: 26, color: 'rgba(232, 163, 58, A)' });
+          for (let i = this.col0; i < this.col0 + this.cols.length; i++) {
+            const col = this.col(i);
+            if (!col.pad || col.used) continue;
+            const sx = i * CELL - this.dist;
+            if (sx < -20 || sx > w + 20) continue;
+            lights.push({ x: sx + CELL / 2, y: base - col.h * LEVEL - 3, r: 18, color: 'rgba(232, 163, 58, A)' });
+          }
+          applyLighting(c, this.lctx, this.lightCanvas, w, h, lights, this.occluders(), 0.55);
+        }
+
         // Words
         c.font = '600 10px -apple-system, Segoe UI, Roboto, sans-serif';
         c.textBaseline = 'top'; c.textAlign = 'right';
@@ -1225,6 +1354,7 @@
         c.shadowBlur = 0;
       }
     }
+    DashWidget.cast = castLight;
     customElements.define('dash-widget', DashWidget);
 
     // ---- The second runner: three lanes, seen from behind -------------------
@@ -1250,6 +1380,9 @@
         this.ctx = this.canvas.getContext('2d');
         this.best = +stored(SURF_KEY, 0) || 0;
         this.state = 'idle';
+        this.rt = stored(RT_KEY, true) !== false;
+        this.lightCanvas = document.createElement('canvas');
+        this.lctx = this.lightCanvas.getContext('2d');
         this.reset(1);
         this.canvas.addEventListener('pointerdown', (e) => { e.preventDefault(); this.from = { x: e.clientX, y: e.clientY }; });
         this.onUp = (e) => {
@@ -1295,9 +1428,11 @@
         const r = this.getBoundingClientRect();
         this.w = Math.max(1, r.width); this.h = Math.max(1, r.height);
         this.canvas.width = Math.round(this.w * dpr); this.canvas.height = Math.round(this.h * dpr);
+        this.lightCanvas.width = this.canvas.width; this.lightCanvas.height = this.canvas.height;
         this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         this.draw();
       }
+      setRT(on) { this.rt = on; this.draw(); }
 
       reset(seed) {
         this.rng = seeded(seed);
@@ -1438,12 +1573,20 @@
           const step = Math.max(3, 6 * p.s);
           for (let yy = p.y - bh + step; yy < p.y - step; yy += step) for (let xx = x0 + step * 0.6; xx < x0 + bw - step * 0.6; xx += step) if (((xx * 3 + yy * 5) | 0) % 7 < 3) c.fillRect(xx, yy, Math.max(1, step * 0.3), Math.max(1, step * 0.3));
         }
-        // Things on the track, far to near, each with a shadow.
+        // Things on the track, far to near, each with a shadow. Their faces
+        // are remembered as edges for the light, and headlights as lights.
+        const segs = [], lights = [];
         const sorted = [...this.items].sort((a, b) => b.z - a.z);
         for (const it of sorted) {
           if (it.done) continue;
           const p = this.proj(Math.max(0, it.z));
           const x = this.laneX(it.lane, p.s), lw = w * 0.22 * p.s, u = h * 0.3 * p.s;
+          if (it.kind === 'low') segs.push(...rectEdges(x - lw / 2, p.y - u * 0.4, lw, u * 0.4));
+          else if (it.kind === 'high') segs.push(...rectEdges(x - lw / 2, p.y - u * 1.3, lw, u * 0.5));
+          else if (it.kind === 'train') {
+            segs.push(...rectEdges(x - lw / 2, p.y - u * 1.2, lw, u * 1.2));
+            if (it.z > 0.02) lights.push({ x: x - lw / 2 + lw * 0.2, y: p.y - u * 0.42, r: lw * 1.6, color: 'rgba(255, 241, 194, A)' }, { x: x + lw / 2 - lw * 0.2, y: p.y - u * 0.42, r: lw * 1.6, color: 'rgba(255, 241, 194, A)' });
+          } else lights.push({ x, y: p.y - u * 0.35, r: u * 0.9, color: 'rgba(232, 163, 58, A)' });
           if (it.kind === 'coin') {
             const spin = Math.abs(Math.cos(this.t * 6 + it.z * 20));
             c.fillStyle = 'rgba(0, 0, 0, .25)'; c.beginPath(); c.ellipse(x, p.y, u * 0.16, u * 0.05, 0, 0, Math.PI * 2); c.fill();
@@ -1509,6 +1652,13 @@
           c.fillStyle = col; c.beginPath(); c.arc(px, torsoY - ph * 0.1, ph * 0.13, 0, Math.PI * 2); c.fill();
           c.fillStyle = '#f3d6b0'; c.beginPath(); c.arc(px, torsoY - ph * 0.08, ph * 0.09, 0, Math.PI * 2); c.fill();
         }
+        // Ray-traced light: the runner carries a lamp, trains their headlights,
+        // coins a glint; barriers, signs and train faces throw shadows.
+        if (this.rt && this.lctx) {
+          lights.push({ x: px, y: baseY - ph * 0.4, r: w * 0.42, color: 'rgba(255, 200, 110, A)' });
+          applyLighting(c, this.lctx, this.lightCanvas, w, h, lights, segs, 0.5);
+        }
+
         // Speed lines when it is getting quick.
         if (this.state === 'running' && this.speed > 1.15) {
           c.strokeStyle = `rgba(243, 247, 244, ${(this.speed - 1.15) * 0.6})`; c.lineWidth = 1;
@@ -1536,6 +1686,13 @@
     document.getElementById('jumpBtn').addEventListener('pointerdown', (e) => {
       e.preventDefault();
       document.querySelector('dash-widget').press();
+    });
+    document.getElementById('rtBtn').setAttribute('aria-pressed', String(stored(RT_KEY, true) !== false));
+    document.getElementById('rtBtn').addEventListener('click', (e) => {
+      const on = e.currentTarget.getAttribute('aria-pressed') !== 'true';
+      e.currentTarget.setAttribute('aria-pressed', String(on));
+      store(RT_KEY, on);
+      for (const widget of document.querySelectorAll('dash-widget, surf-widget')) widget.setRT(on);
     });
     document.getElementById('autoBtn').addEventListener('click', (e) => {
       const on = e.currentTarget.getAttribute('aria-pressed') !== 'true';

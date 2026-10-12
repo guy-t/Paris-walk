@@ -64,7 +64,11 @@ calculator.html   a scientific calculator, the same shape: one file, a
                   and are the caret's otherwise; best under `calc:surf`.
                   Both are drawn with some care — a night city and a moon
                   behind the cube, buildings streaming past the lanes — and
-                  every draw() guards a missing canvas, so jsdom can run them. Writing two things
+                  lit by ray-cast light (`castLight`, `applyLighting`): rays
+                  from each lamp stop at the first edge they hit, so blocks,
+                  spikes, barriers and trains throw real shadows; RT in the
+                  bar toggles it, remembered under `calc:rt`. Every draw()
+                  guards a missing canvas, so jsdom can run them. Writing two things
                   together (2π) binds tighter than ÷, as on a Casio. A caret
                   (tap a token, or ← →) edits anywhere in the expression;
                   tapping the result copies it. `scripts/calculator.test.ts`
